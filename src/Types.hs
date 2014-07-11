@@ -2,10 +2,23 @@ module Types where
 
 import Text.ParserCombinators.Parsec hiding (spaces)
 
+escapeSpecial :: Parser String
+escapeSpecial = do
+    _ <- char '\\' --left-factored this out of escapeQuote and escapeOthers
+    escapeQuote <|> escapeOthers
+
+-- escape quotes
+-- e.g. '"i say \"this is a valid string.\""'
 escapeQuote :: Parser String
 escapeQuote = do
-    _ <- string "\\\""
-    return "\""
+    s <- char '"'
+    return [s]
+
+-- escape \n, \r, \t, \\
+escapeOthers :: Parser String
+escapeOthers = do
+    s <- oneOf "nrt\\"
+    return $ '\\':[s]
 
 specialSymbols :: Parser Char
 specialSymbols = oneOf "!$%&|*+-/:<=?>@^_~#"

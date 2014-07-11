@@ -27,7 +27,7 @@ parseNumber = liftM (Number . read) $ many1 digit
 parseString :: Parser LispVal
 parseString = do
     _ <- char '"'
-    s <- many $ many1 (noneOf "\\\"") <|> escapeQuote
+    s <- many $ many1 (noneOf "\\\"") <|> escapeSpecial
     _ <- char '"'
     return $ String (concat s)
 
