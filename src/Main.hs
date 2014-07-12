@@ -7,4 +7,4 @@ main :: IO ()
 main = do
     args <- getArgs
     putStrLn (readExpr $ head args)
-
+    --putStrLn (readExprUnfactored $ head args)
