@@ -4,9 +4,9 @@ module Types where
 -- or symbols
 -- A DottedList is the CAR-CADR type Lisp list
 data LispVal =  Atom String |
-                List [LispVal] |
-                DottedList [LispVal] LispVal |
                 Number Integer |
                 Bool Bool |
-                String String
+                String String |
+                List [LispVal] |
+                DottedList [LispVal] LispVal
                 deriving Show

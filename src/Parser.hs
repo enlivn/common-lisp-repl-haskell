@@ -1,23 +1,49 @@
-module LispParser where
+module Parser where
 
 import Text.ParserCombinators.Parsec hiding (spaces)
 import Types
+import Evaluator
 import Control.Monad (liftM)
 
-readExpr :: String -> String
-readExpr inp = case parse parseExpr "lisp" inp of
+-- show the raw form of the resulting LispVal
+-- for debugging use only
+readExprRaw :: String -> String
+readExprRaw inp = case parse parseExpr "lisp" inp of
     Left err -> "No match: " ++ show err
     Right val -> "Found value: " ++ show val
 
+readExpr :: String -> LispVal
+readExpr inp = case parse parseExpr "lisp" inp of
+    Left err -> String $ "No match: " ++ show err
+    Right val -> eval val
+
 parseExpr :: Parser LispVal
-parseExpr = parseAtom <|>
-            parseNumber <|>
+parseExpr = try parseSpecialAtom <|>
+            try parseNumber <|>
+            parseAtom <|>
             parseString <|>
             parseSingleQuoted <|>
             parseListCommon
 
+-- functions "1+" and "1-"
+parseSpecialAtom :: Parser LispVal
+parseSpecialAtom = do
+    x <- char '1'
+    y <- oneOf "+-"
+    return $ Atom $ x:[y]
+
+-- "+1" and "-1" are valid numbers. They are not atoms.
+parseNumber :: Parser LispVal
+parseNumber = do
+    y <- option '+' (oneOf "+-")
+    x <- many1 digit
+    case y of
+        '+' -> return $ (Number . read) $ x
+        _   -> return $ (Number . read) $ y:x
+
 -- An Atom is a letter or symbol followed by any number of letters, digits,
 -- or symbols
+-- However, "+1" and "-1" are valid numbers. They are not atoms.
 parseAtom :: Parser LispVal
 parseAtom = do
     first <- letter <|> specialSymbols
@@ -27,9 +53,6 @@ parseAtom = do
         "#t" -> return $ Bool True
         "#f" -> return $ Bool False
         _ -> return $ Atom atom
-
-parseNumber :: Parser LispVal
-parseNumber = liftM (Number . read) $ many1 digit
 
 parseString :: Parser LispVal
 parseString = do
@@ -93,7 +116,7 @@ parseListCommon = do
 readExprUnfactored :: String -> String
 readExprUnfactored inp = case parse parseExprUnfactored "lisp" inp of
     Left err -> "No match: " ++ show err
-    Right val -> "Found value: " ++ show val
+    Right val -> "Found value: " ++ showVal val
 
 -- parseExpr with unfactored left grammar. Needs backtracking with the
 -- try block as shown below
@@ -120,3 +143,16 @@ parseDottedListUnfactored = do
     h <- endBy parseExpr space
     t <- char '.' >> ignoreSpaces >> parseExpr
     return $ DottedList h t
+
+-- Used to print values
+showVal :: LispVal -> String
+showVal (Atom a) = a
+showVal (Number n) = show n
+showVal (Bool True) = "#t"
+showVal (Bool False) = "#f"
+showVal (String s) = '"' : s ++ "\""
+showVal (List l) = "(" ++ showLispValList l ++ ")"
+showVal (DottedList h t) = "(" ++ showLispValList h ++ " . " ++ showVal t ++ ")"
+
+showLispValList :: [LispVal] -> String
+showLispValList = unwords . map showVal
