@@ -17,8 +17,8 @@ data LispVal =  Atom String |
 instance Show LispVal where
     show (Atom a) = a
     show (Number n) = show n
-    show (Bool True) = "#t"
-    show (Bool False) = "#f"
+    show (Bool True) = "t"
+    show (Bool False) = "nil"
     show (String s) = '"' : s ++ "\""
     show (List l) = "(" ++ showLispValList l ++ ")"
     show (DottedList h t) = "(" ++ showLispValList h ++ " . " ++ show t ++ ")"

@@ -42,8 +42,8 @@ parseAtom = do
     rest <- many (letter <|> specialSymbols <|> digit)
     let atom = first : rest
     case atom of
-        "#t" -> return $ Bool True
-        "#f" -> return $ Bool False
+        "t" -> return $ Bool True
+        "nil" -> return $ Bool False
         _ -> return $ Atom atom
 
 parseString :: Parser LispVal
