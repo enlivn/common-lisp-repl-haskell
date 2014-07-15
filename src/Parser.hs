@@ -2,20 +2,12 @@ module Parser where
 
 import Text.ParserCombinators.Parsec hiding (spaces)
 import Types
-import Evaluator
-import Control.Monad (liftM)
+import Control.Monad.Error
 
--- show the raw form of the resulting LispVal
--- for debugging use only
-readExprRaw :: String -> String
-readExprRaw inp = case parse parseExpr "lisp" inp of
-    Left err -> "No match: " ++ show err
-    Right val -> "Found value: " ++ show val
-
-readExpr :: String -> LispVal
+readExpr :: String -> ThrowsError LispVal
 readExpr inp = case parse parseExpr "lisp" inp of
-    Left err -> String $ "No match: " ++ show err
-    Right val -> eval val
+    Left err -> throwError (ParseError err)
+    Right val -> return val
 
 parseExpr :: Parser LispVal
 parseExpr = try parseSpecialAtom <|>
@@ -111,12 +103,19 @@ parseListCommon = do
             t <- char '.' >> ignoreSpaces >> parseExpr
             return $ DottedList h t
 
+-- show the raw form of the resulting LispVal
+-- for debugging use only
+readExprRaw :: String -> String
+readExprRaw inp = case parse parseExpr "lisp" inp of
+    Left err -> "No match: " ++ show err
+    Right val -> "Found value: " ++ show val
+
 -- readExpr with unfactored left grammar.
 -- only for comparison with readExpr
 readExprUnfactored :: String -> String
 readExprUnfactored inp = case parse parseExprUnfactored "lisp" inp of
     Left err -> "No match: " ++ show err
-    Right val -> "Found value: " ++ showVal val
+    Right val -> "Found value: " ++ show val
 
 -- parseExpr with unfactored left grammar. Needs backtracking with the
 -- try block as shown below
@@ -143,16 +142,3 @@ parseDottedListUnfactored = do
     h <- endBy parseExpr space
     t <- char '.' >> ignoreSpaces >> parseExpr
     return $ DottedList h t
-
--- Used to print values
-showVal :: LispVal -> String
-showVal (Atom a) = a
-showVal (Number n) = show n
-showVal (Bool True) = "#t"
-showVal (Bool False) = "#f"
-showVal (String s) = '"' : s ++ "\""
-showVal (List l) = "(" ++ showLispValList l ++ ")"
-showVal (DottedList h t) = "(" ++ showLispValList h ++ " . " ++ showVal t ++ ")"
-
-showLispValList :: [LispVal] -> String
-showLispValList = unwords . map showVal
