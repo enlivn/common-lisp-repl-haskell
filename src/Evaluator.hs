@@ -2,6 +2,7 @@ module Evaluator where
 
 import Types
 import Control.Monad.Error
+import Data.Char (toLower)
 
 eval :: LispVal -> ThrowsError LispVal
 eval x@(String _) = return x
@@ -17,34 +18,40 @@ eval (List (Atom func:rest)) = maybe (throwError (NotAFunction "Unrecognized fun
 primitives :: [(String, ([LispVal] -> ThrowsError LispVal))]
 primitives = [
                 -- numeric operations
-                ("+",         numericOp0OrMoreArgs 0 (+)),       -- zero or more args
-                ("*",         numericOp0OrMoreArgs 1 (*)),       -- zero or more args
-                ("-",         numericOp1OrMoreArgs 0 (-)),       -- one or more args
-                ("/",         numericOp1OrMoreArgs 1 div),       -- one or more args -- TODO: / is NOT in line with CLisp specs,
-                                                                                --       which also provide for a Ratio being returned
-                ("/=",        boolNumericOpOneOrMoreArgs (/=)),  -- one or more args
-                ("=",         boolNumericOpOneOrMoreArgs (==)),  -- one or more args
-                ("<",         boolNumericOpOneOrMoreArgs (<)),   -- one or more args
-                (">",         boolNumericOpOneOrMoreArgs (>)),   -- one or more args
-                ("<=",        boolNumericOpOneOrMoreArgs (<=)),  -- one or more args
-                (">=",        boolNumericOpOneOrMoreArgs (>=)),  -- one or more args
-                ("1+",        numericOnePlusOneMinusOp (+)),     -- exactly one arg
-                ("1-",        numericOnePlusOneMinusOp (-)),     -- exactly one arg
-                ("mod",       numericOpNArgs 2 mod),             -- exactly two args
-                ("rem",       numericOpNArgs 2 rem),             -- exactly two args
+                ("+",            numericOp0OrMoreArgs 0 (+)),                     -- zero or more args
+                ("*",            numericOp0OrMoreArgs 1 (*)),                     -- zero or more args
+                ("      -",            numericOp1OrMoreArgs 0 (-)),               -- one or more args
+                ("/",            numericOp1OrMoreArgs 1 div),                     -- one or more args
+                                                                                  -- TODO: / is NOT in line with CLisp specs,
+                                                                                  --       which also provide for a Ratio being returned
+                ("/=",           boolNumericOpOneOrMoreArgs (/=)),                -- one or more args
+                ("=",            boolNumericOpOneOrMoreArgs (==)),                -- one or more args
+                ("<",            boolNumericOpOneOrMoreArgs (<)),                 -- one or more args
+                (">",            boolNumericOpOneOrMoreArgs (>)),                 -- one or more args
+                ("<=",           boolNumericOpOneOrMoreArgs (<=)),                -- one or more args
+                (">=",           boolNumericOpOneOrMoreArgs (>=)),                -- one or more args
+                ("1+",           numericOnePlusOneMinusOp (+)),                   -- exactly one arg
+                ("1      -",           numericOnePlusOneMinusOp (-)),             -- exactly one arg
+                ("mod",          numericOpNArgs 2 mod),                           -- exactly two args
+                ("rem",          numericOpNArgs 2 rem),                           -- exactly two args
 
                 -- boolean operations
-                ("not",       booleanNotOp),                     -- exactly one arg
-                ("and",       booleanAndOp),                     -- zero or more args
-                ("or",        booleanOrOp),                      -- zero or more args
+                ("not",          booleanNotOp),                                   -- exactly one arg
+                ("and",          booleanAndOp),                                   -- zero or more args
+                ("or",           booleanOrOp),                                    -- zero or more args
 
                 -- string operations
-                ("string=",   boolStringOpTwoArgs (==)),         -- exactly two args
-                ("string/=",  boolStringOpTwoArgs (/=)),         -- exactly two args
-                ("string<",   boolStringOpTwoArgs (<)),          -- exactly two args
-                ("string>",   boolStringOpTwoArgs (>)),          -- exactly two args
-                ("string<=",  boolStringOpTwoArgs (<=)),         -- exactly two args
-                ("string>=",  boolStringOpTwoArgs (>=))          -- exactly two args
+                ("string=",      boolStringOpTwoArgs (==)),                       -- exactly two args
+                ("string-equal", boolStringOpTwoArgs (ignorecase (==))),          -- exactly two args
+                ("string/=",     boolStringOpTwoArgs (/=)),                       -- exactly two args
+                ("string<",      boolStringOpTwoArgs (<)),                        -- exactly two args
+                ("string-lessp", boolStringOpTwoArgs (ignorecase (<))),           -- exactly two args
+                ("string>",      boolStringOpTwoArgs (>)),                        -- exactly two args
+                ("string-greaterp", boolStringOpTwoArgs (ignorecase (>))),        -- exactly two args
+                ("string<=",     boolStringOpTwoArgs (<=)),                       -- exactly two args
+                ("string-not-greaterp", boolStringOpTwoArgs (ignorecase (<=))),   -- exactly two args
+                ("string>=",     boolStringOpTwoArgs (>=)),                       -- exactly two args
+                ("string-not-lesserp", boolStringOpTwoArgs (ignorecase (>=)))     -- exactly two args
              ]
 
 --------------------------------------
@@ -86,6 +93,10 @@ boolNumericOpOneOrMoreArgs op l  = genericBoolOpNArgs extractNumber (length l) o
 -- string=, string/=, string<, string>, string<=, string>=
 boolStringOpTwoArgs :: (String -> String -> Bool) -> [LispVal] -> ThrowsError LispVal
 boolStringOpTwoArgs = genericBoolOpNArgs extractString 2
+
+-- for string-equal, string-lessp, string-greaterp, string-not-lesserp, string-not-greaterp
+ignorecase :: (String -> String -> Bool) -> (String -> String -> Bool)
+ignorecase op x y = (op (map toLower x) (map toLower y))
 
 -- not
 -- CLisp 'not' works with generalized booleans. Returns true only if passed nil.
