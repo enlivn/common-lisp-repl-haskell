@@ -65,7 +65,7 @@ primitives = [
                 ("car", car),                                                     -- exactly one arg
                 ("cdr", cdr),                                                     -- exactly one arg
                 ("cons", cons),                                                   -- exactly one arg
-                ("eql", eql)                                                        -- exactly two args
+                ("eql", eql)                                                      -- exactly two args
              ]
 
 --------------------------------------
@@ -168,12 +168,12 @@ eql [(Number x), (Number y)] = return $ Bool ((==) x y)
 eql [(Bool x), (Bool y)] = return $ Bool ((==) x y)
 eql [(String x), (String y)] = return $ Bool ((==) x y)
 eql [(List x), (List y)] | length x /= length y = return $ Bool False
-                         | otherwise = return . Bool =<< liftM (all id) (mapM g (zipIntoList x y))
-                                where g :: [LispVal] -> ThrowsError Bool
-                                      g z = catchError (extractBool =<< eql z) (const $ return False) -- if eql threw an error, treat it as false so this eql invocation fails
+                         | otherwise = return . Bool =<< liftM (all f) (mapM eql (zipIntoList x y))
+                         where f :: LispVal -> Bool
+                               f (Bool z) = z
+                               f _ = False -- this will never happen since eql always returns LispVals of type Bool
 eql [(DottedList x1 x2), (DottedList y1 y2)] = eql [List (x1++[x2]), List (y1++[y2])]
-eql [x, y] = throwError $ Default $ "cannot compare different types: " ++ (show x) ++ " and " ++ (show y)
-eql x = throwError $ NumArgsMismatch "2" x
+eql _ = return $ Bool $ False
 
 zipIntoList :: [LispVal] -> [LispVal] -> [[LispVal]]
 zipIntoList = zipWith (\x y -> x:[y])
