@@ -170,30 +170,35 @@ eql [(Number x), (Number y)] = return $ Bool ((==) x y)
 eql [(Bool x), (Bool y)] = return $ Bool ((==) x y)
 eql [(String x), (String y)] = return $ Bool ((==) x y)
 eql [(List x), (List y)] | length x /= length y = return $ Bool False
-                         | otherwise = return . Bool =<< liftM (all f) (mapM eql (zipIntoList x y))
-                         where
-                               f :: LispVal -> Bool
-                               f (Bool z) = z
-                               f _ = False -- this will never happen since eql always returns LispVals of type Bool
+                         | otherwise = return . Bool =<< liftM (all toBool) (mapM eql (zipIntoList x y))
 
-                               zipIntoList :: [LispVal] -> [LispVal] -> [[LispVal]]
-                               zipIntoList = zipWith (\a b -> a:[b])
 eql [(DottedList x1 x2), (DottedList y1 y2)] = eql [List (x1++[x2]), List (y1++[y2])]
 eql _ = return $ Bool $ False
 
+toBool :: LispVal -> Bool
+toBool (Bool z) = z
+toBool _ = False
+
+zipIntoList :: [LispVal] -> [LispVal] -> [[LispVal]]
+zipIntoList = zipWith (\a b -> a:[b])
 
 -- use applicative <*>
 weak_equal:: [LispVal] -> ThrowsError LispVal
+weak_equal [(List x), (List y)] | length x /= length y = return $ Bool False
+                                | otherwise = return . Bool =<< liftM (all toBool) (mapM weak_equal (zipIntoList x y))
+weak_equal [(DottedList x1 x2), (DottedList y1 y2)] = weak_equal [List (x1++[x2]), List (y1++[y2])]
 weak_equal m@[x, y] = return . Bool . any id  =<< (liftM (:) eqlResult) <*> mapM (extractAndCheckPrimitiveEquality x y) primitiveEqualityFunctions
-    where
-          eqlResult :: ThrowsError Bool
-          eqlResult = f =<< eql m
-          f (Bool z) = return z
-          f _ = return False -- this will never happen since eql always returns LispVals of type Bool
+                      where
+                            eqlResult :: ThrowsError Bool
+                            eqlResult = f =<< eql m
 
-          -- this is a heterogenous list!!
-          primitiveEqualityFunctions :: [Extractor]
-          primitiveEqualityFunctions = [Extractor extractBool, Extractor extractString, Extractor extractNumber]
+                            f :: LispVal -> ThrowsError Bool
+                            f (Bool z) = return z
+                            f _ = return False -- this will never happen since eql always returns LispVals of type Bool
+
+                            -- this is a heterogenous list!!
+                            primitiveEqualityFunctions :: [Extractor]
+                            primitiveEqualityFunctions = [Extractor extractBool, Extractor extractString, Extractor extractNumber]
 weak_equal _ = return $ Bool False
 
 --------------------------------------
