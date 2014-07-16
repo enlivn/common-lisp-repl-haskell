@@ -8,8 +8,16 @@ eval :: LispVal -> ThrowsError LispVal
 eval x@(String _) = return x
 eval x@(Number _) = return x
 eval x@(Bool _) = return x
+-- quoted forms. Note that we don't evaluate the symbol
 eval (List [Atom "quoted", val]) = return val
+-- if clause
+eval (List [Atom "if", predicate, thenForm, elseForm]) = (eval predicate) >>= \x -> case x of
+    Bool True -> eval thenForm
+    Bool False -> eval elseForm
+    _ -> throwError $ Default "if predicate did not evaluate to a boolean value"
+-- functions
 eval (List (Atom func:rest)) = maybe (throwError (NotAFunction "Unrecognized function: " func)) (=<< mapM eval rest) (lookup func primitives)
+-- Note on maybe:
 -- maybe :: b -> (a -> b) -> Maybe a -> b
 -- maybe default_val action maybe_val
 -- if maybe_val is Just x, evaluates (action x) and returns the result
