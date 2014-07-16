@@ -168,11 +168,9 @@ eql [(Number x), (Number y)] = return $ Bool ((==) x y)
 eql [(Bool x), (Bool y)] = return $ Bool ((==) x y)
 eql [(String x), (String y)] = return $ Bool ((==) x y)
 eql [(List x), (List y)] | length x /= length y = return $ Bool False
-                         | otherwise = return . Bool =<< liftM (all f) (mapM eql (zipIntoList x y)) -- we don't have a catchError for the eql call here, so
-                                                                                                    -- if eql throws an error, it'll break the chain right here
-                                where f :: LispVal -> Bool
-                                      f (Bool z) = z
-                                      f _ = False
+                         | otherwise = return . Bool =<< liftM (all id) (mapM g (zipIntoList x y))
+                                where g :: [LispVal] -> ThrowsError Bool
+                                      g z = catchError (extractBool =<< eql z) (const $ return False) -- if eql threw an error, treat it as false so this eql invocation fails
 eql [(DottedList x1 x2), (DottedList y1 y2)] = eql [List (x1++[x2]), List (y1++[y2])]
 eql [x, y] = throwError $ Default $ "cannot compare different types: " ++ (show x) ++ " and " ++ (show y)
 eql x = throwError $ NumArgsMismatch "2" x
