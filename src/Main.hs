@@ -10,4 +10,4 @@ main :: IO ()
 main = do
   x <- getArgs
   (putStrLn . readExprRaw . (!! 0)) $ x
-  (putStrLn . show . extractVal) $ handleError $ liftM show $ (readExpr $ x !! 0) >>= eval
+  (putStrLn . extractVal) $ handleError $ liftM show $ (readExpr $ x !! 0) >>= eval

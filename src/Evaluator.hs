@@ -59,7 +59,12 @@ primitives = [
                 ("string<=",     boolStringOpTwoArgs (<=)),                       -- exactly two args
                 ("string-not-greaterp", boolStringOpTwoArgs (ignorecase (<=))),   -- exactly two args
                 ("string>=",     boolStringOpTwoArgs (>=)),                       -- exactly two args
-                ("string-not-lesserp", boolStringOpTwoArgs (ignorecase (>=)))     -- exactly two args
+                ("string-not-lesserp", boolStringOpTwoArgs (ignorecase (>=))),    -- exactly two args
+
+                -- list operations
+                ("car", car),                                                     -- exactly one argument
+                ("cdr", cdr),                                                     -- exactly one argument
+                ("cons", cons)                                                    -- exactly one argument
              ]
 
 --------------------------------------
@@ -128,7 +133,34 @@ booleanAndOp l = return $ foldl f (Bool True) l
           f (Bool False) _ = Bool False
           f _ y = y
 
+--------------------------------------
+-- list ops
+--------------------------------------
+car :: [LispVal] -> ThrowsError LispVal
+car [List []] = return $ Bool False
+car [List [x]] = return x
+car [List (x:_)] = return x
+car [DottedList [] _] = return $ Bool False
+car [DottedList [x] _] = return x
+car [DottedList (x:_) _] = return x
+car _ = throwError $ Default "car needs a list as an argument"
+
+cdr :: [LispVal] -> ThrowsError LispVal
+cdr [List []] = return $ List []
+cdr [List [_]] = return $ List []
+cdr [List (_:x)] = return $ List x
+cdr [DottedList _ x] = return $ x
+cdr _ = throwError $ Default "cdr needs a list as an argument"
+
+cons :: [LispVal] -> ThrowsError LispVal
+cons [x,(List y)] = return $ List $ x:y                 -- the second one's car becomes the first one's cdr
+cons [z,(DottedList x y)] = return $ DottedList (z:x) y -- the second one's car becomes the first one's cdr
+cons [x, y] = return $ DottedList [x] y                 -- non-list cdr's always make dotted lists
+cons x = throwError $ NumArgsMismatch "= 2" x
+
+--------------------------------------
 -- helper functions
+--------------------------------------
 extractString :: LispVal -> ThrowsError String
 extractString (String x) = return x
 extractString x = throwError (TypeMismatch "String" x)
