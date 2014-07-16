@@ -62,9 +62,10 @@ primitives = [
                 ("string-not-lesserp", boolStringOpTwoArgs (ignorecase (>=))),    -- exactly two args
 
                 -- list operations
-                ("car", car),                                                     -- exactly one argument
-                ("cdr", cdr),                                                     -- exactly one argument
-                ("cons", cons)                                                    -- exactly one argument
+                ("car", car),                                                     -- exactly one arg
+                ("cdr", cdr),                                                     -- exactly one arg
+                ("cons", cons),                                                   -- exactly one arg
+                ("eql", eql)                                                        -- exactly two args
              ]
 
 --------------------------------------
@@ -159,8 +160,33 @@ cons [x, y] = return $ DottedList [x] y                 -- non-list cdr's always
 cons x = throwError $ NumArgsMismatch "= 2" x
 
 --------------------------------------
+-- Equivalence ops
+--------------------------------------
+eql :: [LispVal] -> ThrowsError LispVal
+eql [(Atom x), (Atom y)] = return $ Bool ((==) x y)
+eql [(Number x), (Number y)] = return $ Bool ((==) x y)
+eql [(Bool x), (Bool y)] = return $ Bool ((==) x y)
+eql [(String x), (String y)] = return $ Bool ((==) x y)
+eql [(List x), (List y)] | length x /= length y = return $ Bool False
+                         | otherwise = return . Bool =<< liftM (all f) (mapM eql (zipIntoList x y)) -- we don't have a catchError for the eql call here, so
+                                                                                                    -- if eql throws an error, it'll break the chain right here
+                                where f :: LispVal -> Bool
+                                      f (Bool z) = z
+                                      f _ = False
+eql [(DottedList x1 x2), (DottedList y1 y2)] = eql [List (x1++[x2]), List (y1++[y2])]
+eql [x, y] = throwError $ Default $ "cannot compare different types: " ++ (show x) ++ " and " ++ (show y)
+eql x = throwError $ NumArgsMismatch "2" x
+
+zipIntoList :: [LispVal] -> [LispVal] -> [[LispVal]]
+zipIntoList = zipWith (\x y -> x:[y])
+
+--------------------------------------
 -- helper functions
 --------------------------------------
+extractBool :: LispVal -> ThrowsError Bool
+extractBool (Bool x) = return x
+extractBool x = throwError (TypeMismatch "Bool" x)
+
 extractString :: LispVal -> ThrowsError String
 extractString (String x) = return x
 extractString x = throwError (TypeMismatch "String" x)
