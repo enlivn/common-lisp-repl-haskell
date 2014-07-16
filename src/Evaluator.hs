@@ -3,6 +3,7 @@ module Evaluator where
 import Types
 import Control.Monad.Error
 import Data.Char (toLower)
+import Control.Applicative ((<*>))
 
 eval :: LispVal -> ThrowsError LispVal
 eval x@(String _) = return x
@@ -65,7 +66,8 @@ primitives = [
                 ("car", car),                                                     -- exactly one arg
                 ("cdr", cdr),                                                     -- exactly one arg
                 ("cons", cons),                                                   -- exactly one arg
-                ("eql", eql)                                                      -- exactly two args
+                ("eql", eql),                                                     -- exactly two args
+                ("weak_equal", weak_equal)                                        -- NOT a common lisp function. Ignores types. exactly two args
              ]
 
 --------------------------------------
@@ -169,30 +171,57 @@ eql [(Bool x), (Bool y)] = return $ Bool ((==) x y)
 eql [(String x), (String y)] = return $ Bool ((==) x y)
 eql [(List x), (List y)] | length x /= length y = return $ Bool False
                          | otherwise = return . Bool =<< liftM (all f) (mapM eql (zipIntoList x y))
-                         where f :: LispVal -> Bool
+                         where
+                               f :: LispVal -> Bool
                                f (Bool z) = z
                                f _ = False -- this will never happen since eql always returns LispVals of type Bool
+
+                               zipIntoList :: [LispVal] -> [LispVal] -> [[LispVal]]
+                               zipIntoList = zipWith (\a b -> a:[b])
 eql [(DottedList x1 x2), (DottedList y1 y2)] = eql [List (x1++[x2]), List (y1++[y2])]
 eql _ = return $ Bool $ False
 
-zipIntoList :: [LispVal] -> [LispVal] -> [[LispVal]]
-zipIntoList = zipWith (\x y -> x:[y])
+
+-- use applicative <*>
+weak_equal:: [LispVal] -> ThrowsError LispVal
+weak_equal m@[x, y] = return . Bool . any id  =<< (liftM (:) eqlResult) <*> mapM (extractAndCheckPrimitiveEquality x y) primitiveEqualityFunctions
+    where
+          eqlResult :: ThrowsError Bool
+          eqlResult = f =<< eql m
+          f (Bool z) = return z
+          f _ = return False -- this will never happen since eql always returns LispVals of type Bool
+
+          -- this is a heterogenous list!!
+          primitiveEqualityFunctions :: [Extractor]
+          primitiveEqualityFunctions = [Extractor extractBool, Extractor extractString, Extractor extractNumber]
+weak_equal _ = return $ Bool False
 
 --------------------------------------
 -- helper functions
 --------------------------------------
+extractAndCheckPrimitiveEquality :: LispVal -> LispVal -> Extractor -> ThrowsError Bool
+extractAndCheckPrimitiveEquality x y (Extractor extractFunc) = do
+    catchError (do{
+        extractedX <- extractFunc x;
+        extractedY <- extractFunc y;
+        return $ extractedX == extractedY})
+        (const (return False))
+
 extractBool :: LispVal -> ThrowsError Bool
 extractBool (Bool x) = return x
 extractBool x = throwError (TypeMismatch "Bool" x)
 
 extractString :: LispVal -> ThrowsError String
 extractString (String x) = return x
+extractString (Number x) = return $ show x
+extractString (Bool x) | x = return "t"
+                       | otherwise = return "NIL"
 extractString x = throwError (TypeMismatch "String" x)
 
 extractNumber :: LispVal -> ThrowsError Integer
 extractNumber (Number x) = return x
---extractNumber (String x) = case reads x :: [(Integer, String)] of
---    [] ->  throwError (TypeMismatch "Integer" (String ""))
---    y -> return $ (fst . head) y
---extractNumber (List [x]) = extractNumber x
+extractNumber (String x) = case reads x :: [(Integer, String)] of
+    [] ->  throwError (TypeMismatch "Integer" (String ""))
+    y -> return $ (fst . head) y
+extractNumber (List [x]) = extractNumber x
 extractNumber x = throwError (TypeMismatch "Integer" x)

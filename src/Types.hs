@@ -1,3 +1,4 @@
+{-# LANGUAGE ExistentialQuantification #-}
 module Types where
 
 import Text.ParserCombinators.Parsec hiding (spaces)
@@ -57,3 +58,5 @@ handleError monadAction = catchError monadAction (return . show)
 -- Make sure we never give it a Left by using handleError for possible Lefts
 extractVal :: ThrowsError a -> a
 extractVal (Right a) = a
+
+data Extractor = forall a . Eq a => Extractor (LispVal -> ThrowsError a)
