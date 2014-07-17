@@ -22,24 +22,27 @@ evalExpr str = (extractVal . handleError) $ liftM show $ (readExpr $ str !! 0) >
 evalAndPrintExpr :: [String] -> IO ()
 evalAndPrintExpr = (outputStrLn . evalExpr)
 
+-- used for debugging to see parse result
 evalRawExpr :: [String] -> String
 evalRawExpr = readExprRaw . (!! 0)
 
 evalAndPrintRawExpr :: [String] -> IO ()
 evalAndPrintRawExpr = (outputStrLn . evalRawExpr)
 
-loop_ :: String -> (String -> Bool) -> IO ()
-loop_ prompt terminatePred = do
-    input <- promptAndReadInput prompt
+evalAndPrintRawAndPlainExpr :: String -> IO ()
+evalAndPrintRawAndPlainExpr x = evalAndPrintRawExpr [x] >> evalAndPrintExpr [x]
+
+loop_ :: Monad m => m a -> (a -> Bool) -> (a -> m()) -> m ()
+loop_ promptFunc terminatePred action = do
+    input <- promptFunc
     if (terminatePred input) then
       return ()
     else do
-      evalAndPrintRawExpr [input]
-      evalAndPrintExpr [input]
-      loop_ prompt terminatePred
+      action input
+      loop_ promptFunc terminatePred action
 
 runRepl :: IO ()
-runRepl = loop_ "clisp>> " (== "quit")
+runRepl = loop_ (promptAndReadInput "clisp>> ") (== "quit") (evalAndPrintRawAndPlainExpr)
 
 main :: IO ()
 main = do
