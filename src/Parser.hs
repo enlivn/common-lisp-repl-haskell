@@ -4,13 +4,13 @@ import Text.ParserCombinators.Parsec hiding (spaces)
 import Types
 import Control.Monad.Error
 
-readExpr :: String -> ThrowsError LispVal
-readExpr inp = case parse parseExpr "lisp" inp of
+parseExpr :: String -> ThrowsError LispVal
+parseExpr inp = case parse parseExpr' "lisp" inp of
     Left err -> throwError (ParseError err)
     Right val -> return val
 
-parseExpr :: Parser LispVal
-parseExpr = try parseSpecialAtom <|>
+parseExpr' :: Parser LispVal
+parseExpr' = try parseSpecialAtom <|>
             try parseNumber <|>
             parseAtom <|>
             parseString <|>
@@ -75,7 +75,7 @@ parseString = do
 parseSingleQuoted :: Parser LispVal
 parseSingleQuoted = do
     _ <- char '\''
-    x <- parseExpr
+    x <- parseExpr'
     return $ List $ Atom "quoted" : [x]
 
 specialSymbols :: Parser Char
@@ -85,11 +85,11 @@ ignoreSpaces :: Parser ()
 ignoreSpaces = skipMany1 space
 
 -- list parsing with factored out left grammar. No need for backtracking
--- in parseExpr
+-- in parseExpr'
 parseListCommon :: Parser LispVal
 parseListCommon = do
     _ <- char '('
-    h <- sepEndBy (skipMany space >> parseExpr) (skipMany space)
+    h <- sepEndBy (skipMany space >> parseExpr') (skipMany space)
     x <- parseDotted h <|> parseNormal h
     _ <- char ')'
     return x
@@ -100,31 +100,31 @@ parseListCommon = do
 
         parseDotted :: [LispVal] -> Parser LispVal
         parseDotted h = do
-            t <- char '.' >> ignoreSpaces >> parseExpr
+            t <- char '.' >> ignoreSpaces >> parseExpr'
             return $ DottedList h t
 
 -- show the raw form of the resulting LispVal
 -- for debugging use only
-readExprRaw :: String -> String
-readExprRaw inp = case parse parseExpr "lisp" inp of
+parseExprRaw :: String -> String
+parseExprRaw inp = case parse parseExpr' "lisp" inp of
     Left err -> "No match: " ++ show err
     Right val -> "Found value: " ++ show val
 
--- readExpr with unfactored left grammar.
--- only for comparison with readExpr
-readExprUnfactored :: String -> String
-readExprUnfactored inp = case parse parseExprUnfactored "lisp" inp of
+-- parseExpr with unfactored left grammar.
+-- only for comparison with parseExpr
+parseExprUnfactored :: String -> String
+parseExprUnfactored inp = case parse parseExpr'Unfactored "lisp" inp of
     Left err -> "No match: " ++ show err
     Right val -> "Found value: " ++ show val
 
--- parseExpr with unfactored left grammar. Needs backtracking with the
+-- parseExpr' with unfactored left grammar. Needs backtracking with the
 -- try block as shown below
-parseExprUnfactored :: Parser LispVal
-parseExprUnfactored = parseAtom <|>
+parseExpr'Unfactored :: Parser LispVal
+parseExpr'Unfactored = parseAtom <|>
             parseNumber <|>
             parseString <|>
             -- parseSingleQuoted, parseListUnfactored and parseDottedListUnfactored allow recursion
-            -- becase they call parseExpr
+            -- becase they call parseExpr'
             parseSingleQuoted <|>
             do
                 _ <- char '('
@@ -134,11 +134,11 @@ parseExprUnfactored = parseAtom <|>
                 return x
 
 parseListUnfactored :: Parser LispVal
-parseListUnfactored = liftM List $ sepBy parseExpr (skipMany space)
+parseListUnfactored = liftM List $ sepBy parseExpr' (skipMany space)
 
 -- A DottedList is the CAR-CADR type Lisp list
 parseDottedListUnfactored :: Parser LispVal
 parseDottedListUnfactored = do
-    h <- endBy parseExpr space
-    t <- char '.' >> ignoreSpaces >> parseExpr
+    h <- endBy parseExpr' space
+    t <- char '.' >> ignoreSpaces >> parseExpr'
     return $ DottedList h t

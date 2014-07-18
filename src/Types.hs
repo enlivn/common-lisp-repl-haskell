@@ -39,7 +39,7 @@ instance Show LispError where
     show (NumArgsMismatch expectedNumArgs foundArgs) = "Incorrect Number of Args - expected: " ++ expectedNumArgs ++ ", found: " ++ show foundArgs
     show (TypeMismatch expectedType actualLispVal)   = "Invalid type - expected: " ++ expectedType ++ ", found: " ++ show actualLispVal
     show (ParseError err)                            = "Parse error - " ++ show err
-    show (NotAFunction msg func)                     = "Invalid function - message: " ++ msg ++ ", function: " ++ func
+    show (NotAFunction msg func)                     = "Invalid function - message: " ++ msg ++ ", function name: " ++ func
     show (UnboundVar msg varName)                    = "Unbound variable - message: " ++ msg ++ ", found: " ++ varName
     show (Default msg)                               = "Error - message: " ++ msg
 

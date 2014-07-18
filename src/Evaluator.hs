@@ -4,21 +4,24 @@ import Types
 import Control.Monad.Error
 import Data.Char (toLower)
 import Control.Applicative ((<*>))
+import Monad
 
-eval :: LispVal -> ThrowsError LispVal
-eval x@(String _) = return x
-eval x@(Number _) = return x
-eval x@(Bool _) = return x
+eval :: EnvIORef -> LispVal -> ThrowsErrorIO LispVal
+eval _ x@(String _) = return x
+eval _ x@(Number _) = return x
+eval _ x@(Bool _) = return x
 -- quoted forms. Note that we don't evaluate the symbol
-eval (List [Atom "quoted", val]) = return val
+eval _ (List [Atom "quoted", val]) = return val
 -- if clause
-eval (List [Atom "if", predicate, thenForm, elseForm]) = (eval predicate) >>= \x -> case x of
-    Bool True -> eval thenForm
-    Bool False -> eval elseForm
-    _ -> throwError $ Default "if predicate did not evaluate to a boolean value"
+eval envIORef (List [Atom "if", predicate, thenForm, elseForm]) = (eval envIORef predicate) >>= \x ->
+    case x of
+        Bool True -> eval envIORef thenForm
+        Bool False -> eval envIORef elseForm
+        _ -> throwError $ Default "if predicate did not evaluate to a boolean value"
 -- functions
-eval (List (Atom func:rest)) = maybe (throwError (NotAFunction "Unrecognized function: " func)) (=<< mapM eval rest) (lookup func primitives)
--- Note on maybe:
+eval envIORef (List (Atom func:rest)) = (maybe (throwError (NotAFunction "Unrecognized function" func))
+                                               (\primitiveFunc -> (liftThrowsError . primitiveFunc) =<< (mapM (eval envIORef) rest)))
+                                               =<< return (lookup func primitives)
 -- maybe :: b -> (a -> b) -> Maybe a -> b
 -- maybe default_val action maybe_val
 -- if maybe_val is Just x, evaluates (action x) and returns the result
@@ -29,7 +32,7 @@ primitives = [
                 -- numeric operations
                 ("+",            numericOp0OrMoreArgs 0 (+)),                     -- zero or more args
                 ("*",            numericOp0OrMoreArgs 1 (*)),                     -- zero or more args
-                ("      -",            numericOp1OrMoreArgs 0 (-)),               -- one or more args
+                ("-",            numericOp1OrMoreArgs 0 (-)),                     -- one or more args
                 ("/",            numericOp1OrMoreArgs 1 div),                     -- one or more args
                                                                                   -- TODO: / is NOT in line with CLisp specs,
                                                                                   --       which also provide for a Ratio being returned
@@ -40,7 +43,7 @@ primitives = [
                 ("<=",           boolNumericOpOneOrMoreArgs (<=)),                -- one or more args
                 (">=",           boolNumericOpOneOrMoreArgs (>=)),                -- one or more args
                 ("1+",           numericOnePlusOneMinusOp (+)),                   -- exactly one arg
-                ("1      -",           numericOnePlusOneMinusOp (-)),             -- exactly one arg
+                ("1-",           numericOnePlusOneMinusOp (-)),                   -- exactly one arg
                 ("mod",          numericOpNArgs 2 mod),                           -- exactly two args
                 ("rem",          numericOpNArgs 2 rem),                           -- exactly two args
 
@@ -67,7 +70,7 @@ primitives = [
                 ("cdr", cdr),                                                     -- exactly one arg
                 ("cons", cons),                                                   -- exactly one arg
                 ("eql", eql),                                                     -- exactly two args
-                ("weak_equal", weak_equal)                                        -- NOT a common lisp function. Ignores types. exactly two args
+                ("weak_equal", weak_equal)                                        -- NOT a common lisp function. equivalence ignoring types. exactly two args
              ]
 
 --------------------------------------
@@ -82,8 +85,8 @@ numericOp1OrMoreArgs start op l = return . Number =<< (liftM (foldl op start) (m
 
 -- 1+ and 1-
 numericOnePlusOneMinusOp :: (Integer -> Integer -> Integer) -> [LispVal] -> ThrowsError LispVal
-numericOnePlusOneMinusOp op l | length l /= 1 =  throwError (NumArgsMismatch "= 1" [])
-                     | otherwise     = return =<< (\x -> return $ Number $ op x 1) =<< extractNumber (head l)
+numericOnePlusOneMinusOp op l | length l /= 1 =  throwError (NumArgsMismatch "= 1" l)
+                              | otherwise     = return =<< (\x -> return $ Number $ op x 1) =<< extractNumber (head l)
 
 -- mod and rem
 numericOpNArgs :: Int -> (Integer -> Integer -> Integer) -> [LispVal] -> ThrowsError LispVal
@@ -225,6 +228,7 @@ extractString x = throwError (TypeMismatch "String" x)
 
 extractNumber :: LispVal -> ThrowsError Integer
 extractNumber (Number x) = return x
+-- strictly speaking, Common Lisp does not allow strings to be interpreted as numbers without using parse-integer
 extractNumber (String x) = case reads x :: [(Integer, String)] of
     [] ->  throwError (TypeMismatch "Integer" (String ""))
     y -> return $ (fst . head) y

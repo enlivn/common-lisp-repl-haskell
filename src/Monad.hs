@@ -8,11 +8,12 @@ type Env = [(String, IORef LispVal)]
 
 type EnvIORef = IORef Env
 
-freshEnv :: IO EnvIORef
-freshEnv = newIORef [] -- newIORef :: a -> IO (IORef a)
+initEnv :: IO EnvIORef
+initEnv = newIORef [] -- newIORef :: a -> IO (IORef a)
 
 type ThrowsErrorIO = ErrorT LispError IO
 
+-- this is a one-way street!! you CANNOT escape back to pure code (except by unsafe IO)
 liftThrowsError :: ThrowsError a -> ThrowsErrorIO a
 liftThrowsError (Left a) = throwError a
 liftThrowsError (Right a) = return a
@@ -47,6 +48,9 @@ defineVar envIORef varName newValue = do
             createAndSetNewVar env = do
                 newCreatedValue <- newIORef newValue
                 writeIORef envIORef (env ++ [(varName, newCreatedValue)]) >> readIORef newCreatedValue -- writeIORef :: IORef a -> a -> IO ()
+
+bindMultipleVars :: EnvIORef -> [(String, LispVal)] -> ThrowsErrorIO EnvIORef
+bindMultipleVars envIORef bindings = mapM (uncurry $ defineVar envIORef) bindings >> return envIORef
 
 setExistingVar :: LispVal -> IORef LispVal -> IO LispVal
 setExistingVar newValue x = liftIO (writeIORef x newValue) >> readIORef x
