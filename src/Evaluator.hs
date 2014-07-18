@@ -7,9 +7,11 @@ import Control.Applicative ((<*>))
 import Monad
 
 eval :: EnvIORef -> LispVal -> ThrowsErrorIO LispVal
+-- primitives
 eval _ x@(String _) = return x
 eval _ x@(Number _) = return x
 eval _ x@(Bool _) = return x
+eval envIORef (Atom x) = getVar envIORef x
 -- quoted forms. Note that we don't evaluate the symbol
 eval _ (List [Atom "quoted", val]) = return val
 -- if clause
@@ -19,6 +21,7 @@ eval envIORef (List [Atom "if", predicate, thenForm, elseForm]) = (eval envIORef
         Bool False -> eval envIORef elseForm
         _ -> throwError $ Default "if predicate did not evaluate to a boolean value"
 -- functions
+eval envIORef (List (Atom "setq":x)) = setq envIORef x
 eval envIORef (List (Atom func:rest)) = (maybe (throwError (NotAFunction "Unrecognized function" func))
                                                (\primitiveFunc -> (liftThrowsError . primitiveFunc) =<< (mapM (eval envIORef) rest)))
                                                =<< return (lookup func primitives)
@@ -203,6 +206,15 @@ weak_equal m@[x, y] = return . Bool . any id  =<< (liftM (:) eqlResult) <*> mapM
                             primitiveEqualityFunctions :: [Extractor]
                             primitiveEqualityFunctions = [Extractor extractBool, Extractor extractString, Extractor extractNumber]
 weak_equal _ = return $ Bool False
+
+--------------------------------------
+-- data ops
+--------------------------------------
+setq :: EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
+setq envIORef l | length l /= 2 = throwError (NumArgsMismatch "2" l)
+                | otherwise = case l of
+                    [Atom varName, value] -> defineVar envIORef varName value
+                    x -> throwError (TypeMismatch "Atom" (head x))
 
 --------------------------------------
 -- helper functions
