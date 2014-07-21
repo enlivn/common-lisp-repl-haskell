@@ -5,6 +5,12 @@ import Text.ParserCombinators.Parsec hiding (spaces)
 import Control.Monad.Error
 import Data.IORef
 
+type Env = [(String, IORef LispVal)]
+
+type EnvIORef = IORef Env
+
+type ThrowsError = Either LispError
+
 -- An Atom is a letter or symbol followed by any number of letters, digits,
 -- or symbols
 -- A DottedList is the CAR-CADR type Lisp list
@@ -15,7 +21,16 @@ data LispVal =  Atom String |
                 List [LispVal] |
                 DottedList [LispVal] LispVal |
                 PrimitiveFunc ([LispVal] -> ThrowsError LispVal) |
-                Func {requiredParams :: [String], optionalParams :: Maybe [String], restParams :: Maybe String, body :: [LispVal], env :: EnvIORef}
+                Func {requiredParams :: [String], optionalParams :: Maybe [String], restParams :: Maybe String, body :: [LispVal], closureEnv :: EnvIORef} -- the function carries around its own environment with bound params. this gives us lexical scoping
+
+data LispError = NumArgsMismatch String [LispVal] |
+                 TypeMismatch String LispVal |
+                 ParseError ParseError |
+                 NotAFunction String String |
+                 UnboundVar String String |
+                 Default String
+
+data Extractor = forall a . Eq a => Extractor (LispVal -> ThrowsError a)
 
 -- Used to print values
 instance Show LispVal where
@@ -41,13 +56,6 @@ instance Show LispVal where
 showLispValList :: [LispVal] -> String
 showLispValList = unwords . map show
 
-data LispError = NumArgsMismatch String [LispVal] |
-                 TypeMismatch String LispVal |
-                 ParseError ParseError |
-                 NotAFunction String String |
-                 UnboundVar String String |
-                 Default String
-
 instance Show LispError where
     show (NumArgsMismatch expectedNumArgs foundArgs) = "Incorrect Number of Args - expected: " ++ expectedNumArgs ++ ", found: " ++ show foundArgs
     show (TypeMismatch expectedType actualLispVal)   = "Invalid type - expected: " ++ expectedType ++ ", found: " ++ show actualLispVal
@@ -69,14 +77,3 @@ handleError monadAction = catchError monadAction (return . show)
 -- Make sure we never give it a Left by using handleError for possible Lefts
 extractVal :: ThrowsError a -> a
 extractVal (Right a) = a
-
-data Extractor = forall a . Eq a => Extractor (LispVal -> ThrowsError a)
-
-type Env = [(String, IORef LispVal)]
-
-initEnv :: IO EnvIORef
-initEnv = newIORef [] -- newIORef :: a -> IO (IORef a)
-
-type EnvIORef = IORef Env
-
-type ThrowsError = Either LispError

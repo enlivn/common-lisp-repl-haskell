@@ -24,7 +24,10 @@ eval envIORef (List [Atom "if", predicate, thenForm, elseForm]) = (eval envIORef
 -- functions
 eval envIORef (List (Atom "setq":x)) = evalSetq envIORef x
 eval envIORef (List (Atom "lambda":paramsAndBody)) = makeLambdaFunc envIORef paramsAndBody
-eval envIORef (List (func:args)) = evalFunc func =<< (mapM (eval envIORef) args)
+eval envIORef (List (func:args)) = do
+    evaledFunc <- eval envIORef func
+    evaledArgs <- mapM (eval envIORef) args
+    evalFunc evaledFunc evaledArgs
 
 --------------------------------------
 -- Setq evaluation
@@ -78,10 +81,10 @@ evalFunc (Func reqParams optParams restParam b e) argList = do
     if length reqParams /= length argList && optParams == Nothing && restParam == Nothing then
         throwError (NumArgsMismatch (show $ length reqParams) argList)
     else
-        bindParamsInClosure >>= bindOptParamsInClosure >>= bindRestParamInClosure >>= (flip eval) (List b)
+        bindReqParamsInClosure >>= bindOptParamsInClosure >>= bindRestParamInClosure >>= (flip eval) (List b)
     where
-        bindParamsInClosure :: ThrowsErrorIO EnvIORef
-        bindParamsInClosure = bindMultipleVars e (zip reqParams argList)
+        bindReqParamsInClosure :: ThrowsErrorIO EnvIORef
+        bindReqParamsInClosure = bindMultipleVars e (zip reqParams argList)
 
         listAfterReq :: [LispVal]
         listAfterReq = drop (length reqParams) argList
