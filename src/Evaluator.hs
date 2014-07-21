@@ -25,6 +25,7 @@ eval envIORef (List [Atom "if", predicate, thenForm, elseForm]) = (eval envIORef
 -- functions
 eval envIORef (List (Atom "setq":newValue)) = evalSetq envIORef newValue
 eval envIORef (List (Atom "lambda":paramsAndBody)) = makeLambdaFunc envIORef paramsAndBody
+eval envIORef (List (Atom "defun":nameAndParamsAndBody)) = defun envIORef nameAndParamsAndBody
 eval envIORef (List (func:args)) = do
     evaledFunc <- eval envIORef func
     evaledArgs <- mapM (eval envIORef) args
@@ -137,6 +138,10 @@ evalFunc (Func reqParams optParams restParam b e) args = bindReqParamsInClosure 
                              | otherwise = mapM (eval closure) b >>= return . last
 
 evalFunc x _ = throwError (TypeMismatch "Function" x)
+
+defun :: EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
+defun envIORef (Atom funcName:paramsAndBody) = makeLambdaFunc envIORef paramsAndBody >>= defineVar envIORef funcName
+defun _ x = throwError (NumArgsMismatch "2" x)
 
 -- primitive functions
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
