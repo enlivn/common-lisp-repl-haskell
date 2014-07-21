@@ -14,6 +14,7 @@ eval _ x@(Number _) = return x
 eval _ x@(Bool _) = return x
 eval envIORef (Atom x) = getVar envIORef x
 -- quoted forms. Note that we don't evaluate the symbol
+eval _ (List []) = return $ Bool False
 eval _ (List [Atom "quoted", val]) = return val
 -- if clause
 eval envIORef (List [Atom "if", predicate, thenForm, elseForm]) = (eval envIORef predicate) >>= \x ->
@@ -22,7 +23,7 @@ eval envIORef (List [Atom "if", predicate, thenForm, elseForm]) = (eval envIORef
         Bool False -> eval envIORef elseForm
         _ -> throwError $ Default "if predicate did not evaluate to a boolean value"
 -- functions
-eval envIORef (List (Atom "setq":x)) = evalSetq envIORef x
+eval envIORef (List (Atom "setq":newValue)) = evalSetq envIORef newValue
 eval envIORef (List (Atom "lambda":paramsAndBody)) = makeLambdaFunc envIORef paramsAndBody
 eval envIORef (List (func:args)) = do
     evaledFunc <- eval envIORef func
@@ -74,20 +75,20 @@ makeLambdaFunc envIORef (List funcParams:funcBody) = do
 makeLambdaFunc _  (x:_) = throwError (TypeMismatch "List" x)
 makeLambdaFunc _  x = throwError (NumArgsMismatch "2" x)
 
--- Note: argList passed in should be already evaluated
+-- Note: args passed in should be already evaluated
 evalFunc :: LispVal -> [LispVal] -> ThrowsErrorIO LispVal
-evalFunc (PrimitiveFunc func) argList = liftThrowsError $ func argList
-evalFunc (Func reqParams optParams restParam b e) argList = do
-    if length reqParams /= length argList && optParams == Nothing && restParam == Nothing then
-        throwError (NumArgsMismatch (show $ length reqParams) argList)
+evalFunc (PrimitiveFunc func) args = liftThrowsError $ func args
+evalFunc (Func reqParams optParams restParam b e) args = do
+    if length reqParams /= length args && optParams == Nothing && restParam == Nothing then
+        throwError (NumArgsMismatch (show $ length reqParams) args)
     else
-        bindReqParamsInClosure >>= bindOptParamsInClosure >>= bindRestParamInClosure >>= (flip eval) (List b)
+        bindReqParamsInClosure >>= bindOptParamsInClosure >>= bindRestParamInClosure >>= evalFuncBody
     where
         bindReqParamsInClosure :: ThrowsErrorIO EnvIORef
-        bindReqParamsInClosure = bindMultipleVars e (zip reqParams argList)
+        bindReqParamsInClosure = bindMultipleVars e (zip reqParams args)
 
         listAfterReq :: [LispVal]
-        listAfterReq = drop (length reqParams) argList
+        listAfterReq = drop (length reqParams) args
 
         bindOptParamsInClosure :: EnvIORef -> ThrowsErrorIO EnvIORef
         bindOptParamsInClosure e' = case optParams of
@@ -104,6 +105,12 @@ evalFunc (Func reqParams optParams restParam b e) argList = do
         bindRestParamInClosure e' = case restParam of
             Nothing -> return e'
             Just x -> bindMultipleVars e' [(x, listAfterReqAndOpt)]
+
+        evalFuncBody :: EnvIORef -> ThrowsErrorIO LispVal
+        -- return NIL if the body is empty, else return the result of the last form
+        evalFuncBody closure | null b = return $ Bool False
+                             | otherwise = mapM (eval closure) b >>= return . last
+
 evalFunc x _ = throwError (TypeMismatch "Function" x)
 
 -- primitive functions

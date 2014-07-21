@@ -21,7 +21,11 @@ data LispVal =  Atom String |
                 List [LispVal] |
                 DottedList [LispVal] LispVal |
                 PrimitiveFunc ([LispVal] -> ThrowsError LispVal) |
-                Func {requiredParams :: [String], optionalParams :: Maybe [String], restParams :: Maybe String, body :: [LispVal], closureEnv :: EnvIORef} -- the function carries around its own environment with bound params. this gives us lexical scoping
+                Func {requiredParams :: [String],
+                      optionalParams :: Maybe [String],
+                      restParams :: Maybe String,
+                      body :: [LispVal],
+                      closureEnv :: EnvIORef} -- the function carries around its own environment with bound params. this gives us lexical scoping
 
 data LispError = NumArgsMismatch String [LispVal] |
                  TypeMismatch String LispVal |
