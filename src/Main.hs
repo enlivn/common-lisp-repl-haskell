@@ -25,8 +25,7 @@ bindPrimitiveFunctions =  bindMultipleVars' (map (\(x,y) -> (x, PrimitiveFunc y)
     where
         bindMultipleVars' :: [(String, LispVal)] -> EnvIORef -> IO EnvIORef
         bindMultipleVars' bindings envIORef = runErrorT (bindMultipleVars envIORef bindings) >>= \x -> case x of
-            Right env -> return env
-            Left _ -> return envIORef -- this should never happen
+            Right env -> return env -- leaving out Left because that signals programmer error
 
 initializeEnv :: IO EnvIORef
 initializeEnv = newIORef [] -- newIORef :: a -> IO (IORef a)

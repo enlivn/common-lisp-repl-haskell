@@ -62,14 +62,23 @@ makeLambdaFunc envIORef (List funcParams:funcBody) = do
           createOptionalParamList :: ThrowsErrorIO (Maybe [String])
           createOptionalParamList = if null optParams then return Nothing
                                     else if length optParams == 1 then throwError (NumArgsMismatch ">= 1" optParams)
-                                    else (return . Just) $ map show $ tail optParams
+                                    else liftM Just $ mapM bindOptParamDefaultValues $ tail optParams
                                     where
                                         optParams = takeWhile (notRestAtom) $ dropWhile (notOptionalAtom) funcParams
+
+                                        bindOptParamDefaultValues :: LispVal -> ThrowsErrorIO String
+                                        bindOptParamDefaultValues (Atom x) = bindMultipleVars envIORef [(x, Bool False)] >> return x -- bind varName to NIL by default
+                                        bindOptParamDefaultValues (List [Atom x]) = bindMultipleVars envIORef [(x, Bool False)] >> return x -- bind varName to NIL by default
+                                        bindOptParamDefaultValues (List [Atom x, val]) = bindMultipleVars envIORef [(x, val)] >> return x -- don't evaluate val, just bind varName to it
+                                        bindOptParamDefaultValues (List [Atom x, val, Atom sVar]) = bindMultipleVars envIORef [(x, List [val, Atom sVar])] >> return x -- supplied p-param bound to NIL by default
+                                        bindOptParamDefaultValues x = throwError (NumArgsMismatch "<= 3" [x])
 
           createRestParam :: ThrowsErrorIO (Maybe String)
           createRestParam = if null restParam then return Nothing
                             else if length restParam /= 2 then throwError (NumArgsMismatch "2" restParam) -- only one specifier allowed for &rest
-                            else (return . Just) $ show (restParam !! 1)
+                            else case restParam !! 1 of -- &rest can only be followed by a symbol (atom)
+                                (Atom x) -> bindMultipleVars envIORef [(x, Bool False)] >> (return . Just) x -- bind varName to NIL by default
+                                x -> throwError (TypeMismatch "Atom" x)
                             where
                                 restParam = dropWhile notRestAtom funcParams
 makeLambdaFunc _  (x:_) = throwError (TypeMismatch "List" x)
@@ -78,14 +87,11 @@ makeLambdaFunc _  x = throwError (NumArgsMismatch "2" x)
 -- Note: args passed in should be already evaluated
 evalFunc :: LispVal -> [LispVal] -> ThrowsErrorIO LispVal
 evalFunc (PrimitiveFunc func) args = liftThrowsError $ func args
-evalFunc (Func reqParams optParams restParam b e) args = do
-    if length reqParams /= length args && optParams == Nothing && restParam == Nothing then
-        throwError (NumArgsMismatch (show $ length reqParams) args)
-    else
-        bindReqParamsInClosure >>= bindOptParamsInClosure >>= bindRestParamInClosure >>= evalFuncBody
+evalFunc (Func reqParams optParams restParam b e) args = bindReqParamsInClosure >>= bindOptParamsInClosure >>= bindRestParamInClosure >>= evalFuncBody
     where
         bindReqParamsInClosure :: ThrowsErrorIO EnvIORef
-        bindReqParamsInClosure = bindMultipleVars e (zip reqParams args)
+        bindReqParamsInClosure | length reqParams > length args = throwError (NumArgsMismatch (">= " ++ (show . length) reqParams) args)
+                               | otherwise = bindMultipleVars e (zip reqParams args)
 
         listAfterReq :: [LispVal]
         listAfterReq = drop (length reqParams) args
@@ -93,7 +99,24 @@ evalFunc (Func reqParams optParams restParam b e) args = do
         bindOptParamsInClosure :: EnvIORef -> ThrowsErrorIO EnvIORef
         bindOptParamsInClosure e' = case optParams of
             Nothing -> return e'
-            Just x -> bindMultipleVars e' (zip x listAfterReq)
+            Just x -> liftM concat (zipWithM f x listAfterReq) >>= bindMultipleVars e' >>= bindOptVarsWithDefaultAndPParamsButNoArgs x
+            where f :: String -> LispVal -> ThrowsErrorIO [(String, LispVal)]
+                  f varName newValue = getVar e' varName >>= \currentVal ->
+                    case currentVal of
+                        (List [_, Atom sVar]) -> return [(sVar, Bool True), (varName, newValue)]
+                        _                     -> return [(varName, newValue)]
+
+                  -- for vars that had default values AND supplied p-params but for which no arguments were provided,
+                  -- set the vars to the default values and the p-params to NIL
+                  -- for vars that had ONLY default values, we've already bound those in makeLambdaFunc. They may have been overriden
+                  -- with user-supplied values in f above, but we don't need to do anything more.
+                  bindOptVarsWithDefaultAndPParamsButNoArgs :: [String]-> EnvIORef -> ThrowsErrorIO EnvIORef
+                  bindOptVarsWithDefaultAndPParamsButNoArgs vars e'' =  liftM concat (mapM g vars) >>= bindMultipleVars e''
+                    where g :: String -> ThrowsErrorIO [(String, LispVal)]
+                          g varName = getVar e'' varName >>= \currentVal ->
+                            case currentVal of
+                                (List [defaultVal, (Atom sVar)]) -> return [(sVar, Bool False), (varName, defaultVal)]
+                                defaultVal                       -> return [(varName,defaultVal)]
 
         listAfterReqAndOpt :: LispVal
         listAfterReqAndOpt = List $ drop (getLengthoP) listAfterReq
@@ -104,10 +127,12 @@ evalFunc (Func reqParams optParams restParam b e) args = do
         bindRestParamInClosure :: EnvIORef -> ThrowsErrorIO EnvIORef
         bindRestParamInClosure e' = case restParam of
             Nothing -> return e'
-            Just x -> bindMultipleVars e' [(x, listAfterReqAndOpt)]
+            Just x -> case listAfterReqAndOpt of
+                List [] -> return e'
+                y -> bindMultipleVars e' [(x, y)] -- override the default bound values if arguments provided
 
-        evalFuncBody :: EnvIORef -> ThrowsErrorIO LispVal
         -- return NIL if the body is empty, else return the result of the last form
+        evalFuncBody :: EnvIORef -> ThrowsErrorIO LispVal
         evalFuncBody closure | null b = return $ Bool False
                              | otherwise = mapM (eval closure) b >>= return . last
 

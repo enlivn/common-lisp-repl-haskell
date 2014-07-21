@@ -22,18 +22,20 @@ isVarDefined envIORef varName = readIORef envIORef >>= (return . (lookup varName
 getVar :: EnvIORef -> String -> ThrowsErrorIO LispVal
 getVar envIORef varName = do
         env <- liftIO $ readIORef envIORef
-        maybe (throwError $ UnboundVar " cannot get unbound variable: " varName) (liftIO . readIORef) (lookup varName env)
+        maybe (throwError $ UnboundVar "cannot get unbound variable" varName) (liftIO . readIORef) (lookup varName env)
 
 -- set an existing var to a new value
 -- throws UnboundVar error if var does not exist
 setVar :: EnvIORef -> String -> LispVal -> ThrowsErrorIO LispVal
 setVar envIORef varName newValue = do
+        liftIO $ putStrLn $ " setting " ++ varName ++ " to " ++ show newValue -- debug
         env <- liftIO $ readIORef envIORef
-        maybe (throwError $ UnboundVar " cannot set unbound variable: " varName) (liftIO . (setExistingVar newValue)) (lookup varName env)
+        maybe (throwError $ UnboundVar "cannot set unbound variable" varName) (liftIO . (setExistingVar newValue)) (lookup varName env)
 
 -- same as setVar except if var doesn't exist, creates it
 defineVar :: EnvIORef -> String -> LispVal -> ThrowsErrorIO LispVal
 defineVar envIORef varName newValue = do
+        -- liftIO $ putStrLn $ " setting " ++ varName ++ " to " ++ show newValue -- debug
         env <- liftIO $ readIORef envIORef
         maybe (liftIO $ createAndSetNewVar env) (liftIO . (setExistingVar newValue)) (lookup varName env)
         where

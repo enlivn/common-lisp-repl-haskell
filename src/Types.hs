@@ -65,7 +65,7 @@ instance Show LispError where
     show (TypeMismatch expectedType actualLispVal)   = "Invalid type - expected: " ++ expectedType ++ ", found: " ++ show actualLispVal
     show (ParseError err)                            = "Parse error - " ++ show err
     show (NotAFunction msg func)                     = "Invalid function - message: " ++ msg ++ ", function name: " ++ func
-    show (UnboundVar msg varName)                    = "Unbound variable - message: " ++ msg ++ ", found: " ++ varName
+    show (UnboundVar msg varName)                    = "Unbound variable - message: " ++ msg ++ ", variable name: " ++ varName
     show (Default msg)                               = "Error - message: " ++ msg
 
 instance Error LispError where
