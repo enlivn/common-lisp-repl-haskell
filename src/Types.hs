@@ -3,6 +3,7 @@ module Types where
 
 import Text.ParserCombinators.Parsec hiding (spaces)
 import Control.Monad.Error
+import Data.IORef
 
 -- An Atom is a letter or symbol followed by any number of letters, digits,
 -- or symbols
@@ -12,7 +13,9 @@ data LispVal =  Atom String |
                 Bool Bool |
                 String String |
                 List [LispVal] |
-                DottedList [LispVal] LispVal
+                DottedList [LispVal] LispVal |
+                PrimitiveFunc ([LispVal] -> ThrowsError LispVal) |
+                Func {requiredParams :: [String], optionalParams :: Maybe [String], restParams :: Maybe String, body :: [LispVal], env :: EnvIORef}
 
 -- Used to print values
 instance Show LispVal where
@@ -24,6 +27,16 @@ instance Show LispVal where
     show (List []) = "NIL"
     show (List l) = "(" ++ showLispValList l ++ ")"
     show (DottedList h t) = "(" ++ showLispValList h ++ " . " ++ show t ++ ")"
+    show (PrimitiveFunc _) = "<primitive function>"
+    show (Func reqParams optParams restParam _ _) = "(lambda required("
+                                ++ unwords reqParams ++ ")"
+                                ++ (case optParams of
+                                        Nothing -> ""
+                                        Just x -> " &optional(" ++ unwords x ++ ") ")
+                                ++ (case restParam of
+                                        Nothing -> ""
+                                        Just x -> " &rest(" ++ x ++ ") ")
+                                ++ " ...)"
 
 showLispValList :: [LispVal] -> String
 showLispValList = unwords . map show
@@ -47,8 +60,6 @@ instance Error LispError where
     strMsg = Default
     noMsg = Default "An error has occurred."
 
-type ThrowsError = Either LispError
-
 -- Make all wrongs Right
 handleError :: ThrowsError String -> ThrowsError String
 handleError monadAction = catchError monadAction (return . show)
@@ -60,3 +71,12 @@ extractVal :: ThrowsError a -> a
 extractVal (Right a) = a
 
 data Extractor = forall a . Eq a => Extractor (LispVal -> ThrowsError a)
+
+type Env = [(String, IORef LispVal)]
+
+initEnv :: IO EnvIORef
+initEnv = newIORef [] -- newIORef :: a -> IO (IORef a)
+
+type EnvIORef = IORef Env
+
+type ThrowsError = Either LispError

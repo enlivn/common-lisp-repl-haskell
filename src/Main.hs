@@ -4,6 +4,7 @@ import Parser
 import System.Environment
 import System.IO
 import Evaluator
+import Types
 import Monad
 import Control.Monad.Error
 

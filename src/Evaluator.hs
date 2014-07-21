@@ -5,6 +5,7 @@ import Control.Monad.Error
 import Data.Char (toLower)
 import Control.Applicative ((<*>))
 import Monad
+import Data.Maybe (fromJust)
 
 eval :: EnvIORef -> LispVal -> ThrowsErrorIO LispVal
 -- primitives
@@ -21,15 +22,89 @@ eval envIORef (List [Atom "if", predicate, thenForm, elseForm]) = (eval envIORef
         Bool False -> eval envIORef elseForm
         _ -> throwError $ Default "if predicate did not evaluate to a boolean value"
 -- functions
-eval envIORef (List (Atom "setq":x)) = setq envIORef x
-eval envIORef (List (Atom func:rest)) = (maybe (throwError (NotAFunction "Unrecognized function" func))
-                                               (\primitiveFunc -> (liftThrowsError . primitiveFunc) =<< (mapM (eval envIORef) rest)))
-                                               =<< return (lookup func primitives)
--- maybe :: b -> (a -> b) -> Maybe a -> b
--- maybe default_val action maybe_val
--- if maybe_val is Just x, evaluates (action x) and returns the result
--- if maybe_val is Nothing, returns default_val
+eval envIORef (List (Atom "setq":x)) = evalSetq envIORef x
+eval envIORef (List (Atom "lambda":paramsAndBody)) = makeLambdaFunc envIORef paramsAndBody
+eval envIORef (List (func:args)) = evalFunc func =<< (mapM (eval envIORef) args)
 
+--------------------------------------
+-- Setq evaluation
+--------------------------------------
+evalSetq :: EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
+evalSetq envIORef l | length l /= 2 = throwError (NumArgsMismatch "2" l)
+                    | otherwise = case l of
+                        [Atom varName, value] -> defineVar envIORef varName value
+                        x -> throwError (TypeMismatch "Atom" (head x))
+
+--------------------------------------
+-- Function evaluation
+--------------------------------------
+makeLambdaFunc :: EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
+makeLambdaFunc envIORef (List funcParams:funcBody) = do
+    optParams <- createOptionalParamList
+    restParam <- createRestParam
+    return $ Func createReqParamList optParams restParam funcBody envIORef
+    where
+          notRestAtom :: LispVal -> Bool
+          notRestAtom (Atom "&rest") = False
+          notRestAtom _ = True
+
+          notOptionalAtom :: LispVal -> Bool
+          notOptionalAtom (Atom "&optional") = False
+          notOptionalAtom _ = True
+
+          createReqParamList :: [String]
+          createReqParamList = map show $ takeWhile (\x -> ((&&) (notOptionalAtom x) (notRestAtom x))) funcParams
+
+          createOptionalParamList :: ThrowsErrorIO (Maybe [String])
+          createOptionalParamList = if null optParams then return Nothing
+                                    else if length optParams == 1 then throwError (NumArgsMismatch ">= 1" optParams)
+                                    else (return . Just) $ map show $ tail optParams
+                                    where
+                                        optParams = takeWhile (notRestAtom) $ dropWhile (notOptionalAtom) funcParams
+
+          createRestParam :: ThrowsErrorIO (Maybe String)
+          createRestParam = if null restParam then return Nothing
+                            else if length restParam /= 2 then throwError (NumArgsMismatch "2" restParam) -- only one specifier allowed for &rest
+                            else (return . Just) $ show (restParam !! 1)
+                            where
+                                restParam = dropWhile notRestAtom funcParams
+makeLambdaFunc _  (x:_) = throwError (TypeMismatch "List" x)
+makeLambdaFunc _  x = throwError (NumArgsMismatch "2" x)
+
+-- Note: argList passed in should be already evaluated
+evalFunc :: LispVal -> [LispVal] -> ThrowsErrorIO LispVal
+evalFunc (PrimitiveFunc func) argList = liftThrowsError $ func argList
+evalFunc (Func reqParams optParams restParam b e) argList = do
+    if length reqParams /= length argList && optParams == Nothing && restParam == Nothing then
+        throwError (NumArgsMismatch (show $ length reqParams) argList)
+    else
+        bindParamsInClosure >>= bindOptParamsInClosure >>= bindRestParamInClosure >>= (flip eval) (List b)
+    where
+        bindParamsInClosure :: ThrowsErrorIO EnvIORef
+        bindParamsInClosure = bindMultipleVars e (zip reqParams argList)
+
+        listAfterReq :: [LispVal]
+        listAfterReq = drop (length reqParams) argList
+
+        bindOptParamsInClosure :: EnvIORef -> ThrowsErrorIO EnvIORef
+        bindOptParamsInClosure e' = case optParams of
+            Nothing -> return e'
+            Just x -> bindMultipleVars e' (zip x listAfterReq)
+
+        listAfterReqAndOpt :: LispVal
+        listAfterReqAndOpt = List $ drop (getLengthoP) listAfterReq
+            where
+                getLengthoP | optParams == Nothing = 0
+                            | otherwise = length (fromJust optParams)
+
+        bindRestParamInClosure :: EnvIORef -> ThrowsErrorIO EnvIORef
+        bindRestParamInClosure e' = case restParam of
+            Nothing -> return e'
+            Just x -> bindMultipleVars e' [(x, listAfterReqAndOpt)]
+evalFunc x _ = throwError (TypeMismatch "Function" x)
+
+-- primitive functions
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 primitives :: [(String, ([LispVal] -> ThrowsError LispVal))]
 primitives = [
                 -- numeric operations
@@ -76,41 +151,40 @@ primitives = [
                 ("weak_equal", weak_equal)                                        -- NOT a common lisp function. equivalence ignoring types. exactly two args
              ]
 
---------------------------------------
--- ops that return a numeric result.
---------------------------------------
+-- Primitive Numeric operations
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 numericOp0OrMoreArgs :: Integer -> (Integer -> Integer -> Integer) -> [LispVal] -> ThrowsError LispVal
-numericOp0OrMoreArgs start op l = return . Number =<< (liftM (foldl op start) (mapM extractNumber l))
+numericOp0OrMoreArgs start optParams l = return . Number =<< (liftM (foldl optParams start) (mapM extractNumber l))
 
 numericOp1OrMoreArgs :: Integer -> (Integer -> Integer -> Integer) -> [LispVal] -> ThrowsError LispVal
 numericOp1OrMoreArgs _ _ [] = throwError (NumArgsMismatch ">=1" [])
-numericOp1OrMoreArgs start op l = return . Number =<< (liftM (foldl op start) (mapM extractNumber l))
+numericOp1OrMoreArgs start optParams l = return . Number =<< (liftM (foldl optParams start) (mapM extractNumber l))
 
 -- 1+ and 1-
 numericOnePlusOneMinusOp :: (Integer -> Integer -> Integer) -> [LispVal] -> ThrowsError LispVal
-numericOnePlusOneMinusOp op l | length l /= 1 =  throwError (NumArgsMismatch "= 1" l)
-                              | otherwise     = return =<< (\x -> return $ Number $ op x 1) =<< extractNumber (head l)
+numericOnePlusOneMinusOp optParams l | length l /= 1 =  throwError (NumArgsMismatch "= 1" l)
+                              | otherwise     = return =<< (\x -> return $ Number $ optParams x 1) =<< extractNumber (head l)
 
 -- mod and rem
 numericOpNArgs :: Int -> (Integer -> Integer -> Integer) -> [LispVal] -> ThrowsError LispVal
-numericOpNArgs n op l | length l /= n = throwError (NumArgsMismatch ("= " ++ show n) l)
-                      | otherwise     = return . Number =<< (\x -> return $ foldl op (head x) (tail x)) =<< (mapM extractNumber l)
+numericOpNArgs n optParams l | length l /= n = throwError (NumArgsMismatch ("= " ++ show n) l)
+                      | otherwise     = return . Number =<< (\x -> return $ foldl optParams (head x) (tail x)) =<< (mapM extractNumber l)
 
---------------------------------------
--- ops that return a boolean result.
---------------------------------------
+-- Primitive ops that return a boolean result
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 -- generic boolean function that we use to build string or numeric specific function
 genericBoolOpNArgs :: (LispVal -> ThrowsError a) -> Int -> (a -> a -> Bool) -> [LispVal] -> ThrowsError LispVal
 genericBoolOpNArgs _ n _ l | length l /= n = throwError (NumArgsMismatch ("= " ++ show n) l)
-genericBoolOpNArgs extractFunc _ op l = return . Bool =<< (\x -> return $ foldl (f (head x)) True (tail x)) =<< (mapM extractFunc l)
+genericBoolOpNArgs extractFunc _ optParams l = return . Bool =<< (\x -> return $ foldl (f (head x)) True (tail x)) =<< (mapM extractFunc l)
     where f _ False _ = False
-          f x _ y | x `op` y = True
+          f x _ y | x `optParams` y = True
                   | otherwise = False
 
 -- >, <, >=, <=, =, /=
 boolNumericOpOneOrMoreArgs :: (Integer -> Integer -> Bool) -> [LispVal] -> ThrowsError LispVal
 boolNumericOpOneOrMoreArgs _ [] = throwError (NumArgsMismatch ">=1" [])
-boolNumericOpOneOrMoreArgs op l  = genericBoolOpNArgs extractNumber (length l) op l -- (length l) effectively bypasses length check in genericBoolOpNArgs
+boolNumericOpOneOrMoreArgs optParams l  = genericBoolOpNArgs extractNumber (length l) optParams l -- (length l) effectively bypasses length check in genericBoolOpNArgs
 
 -- string=, string/=, string<, string>, string<=, string>=
 boolStringOpTwoArgs :: (String -> String -> Bool) -> [LispVal] -> ThrowsError LispVal
@@ -118,7 +192,7 @@ boolStringOpTwoArgs = genericBoolOpNArgs extractString 2
 
 -- for string-equal, string-lessp, string-greaterp, string-not-lesserp, string-not-greaterp
 ignorecase :: (String -> String -> Bool) -> (String -> String -> Bool)
-ignorecase op x y = (op (map toLower x) (map toLower y))
+ignorecase optParams x y = (optParams (map toLower x) (map toLower y))
 
 -- not
 -- CLisp 'not' works with generalized booleans. Returns true only if passed nil.
@@ -142,9 +216,8 @@ booleanAndOp l = return $ foldl f (Bool True) l
           f (Bool False) _ = Bool False
           f _ y = y
 
---------------------------------------
--- list ops
---------------------------------------
+-- Primitive list ops
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 car :: [LispVal] -> ThrowsError LispVal
 car [List []] = return $ Bool False
 car [List [x]] = return x
@@ -167,9 +240,8 @@ cons [z,(DottedList x y)] = return $ DottedList (z:x) y -- the second one's car 
 cons [x, y] = return $ DottedList [x] y                 -- non-list cdr's always make dotted lists
 cons x = throwError $ NumArgsMismatch "= 2" x
 
---------------------------------------
--- Equivalence ops
---------------------------------------
+-- Primitive Equivalence ops
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 eql :: [LispVal] -> ThrowsError LispVal
 eql [(Atom x), (Atom y)] = return $ Bool ((==) x y)
 eql [(Number x), (Number y)] = return $ Bool ((==) x y)
@@ -206,15 +278,6 @@ weak_equal m@[x, y] = return . Bool . any id  =<< (liftM (:) eqlResult) <*> mapM
                             primitiveEqualityFunctions :: [Extractor]
                             primitiveEqualityFunctions = [Extractor extractBool, Extractor extractString, Extractor extractNumber]
 weak_equal _ = return $ Bool False
-
---------------------------------------
--- data ops
---------------------------------------
-setq :: EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
-setq envIORef l | length l /= 2 = throwError (NumArgsMismatch "2" l)
-                | otherwise = case l of
-                    [Atom varName, value] -> defineVar envIORef varName value
-                    x -> throwError (TypeMismatch "Atom" (head x))
 
 --------------------------------------
 -- helper functions

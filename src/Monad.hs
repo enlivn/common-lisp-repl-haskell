@@ -4,13 +4,6 @@ import Data.IORef
 import Types
 import Control.Monad.Error
 
-type Env = [(String, IORef LispVal)]
-
-type EnvIORef = IORef Env
-
-initEnv :: IO EnvIORef
-initEnv = newIORef [] -- newIORef :: a -> IO (IORef a)
-
 type ThrowsErrorIO = ErrorT LispError IO
 
 -- this is a one-way street!! you CANNOT escape back to pure code (except by unsafe IO)
