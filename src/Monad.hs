@@ -6,6 +6,9 @@ import Control.Monad.Error
 
 type ThrowsErrorIO = ErrorT LispError IO
 
+debug :: String -> ThrowsErrorIO ()
+debug = liftIO . putStrLn
+
 -- this is a one-way street!! you CANNOT escape back to pure code (except by unsafe IO)
 liftThrowsError :: ThrowsError a -> ThrowsErrorIO a
 liftThrowsError (Left a) = throwError a
@@ -28,14 +31,14 @@ getVar envIORef varName = do
 -- throws UnboundVar error if var does not exist
 setVar :: EnvIORef -> String -> LispVal -> ThrowsErrorIO LispVal
 setVar envIORef varName newValue = do
-        liftIO $ putStrLn $ " setting " ++ varName ++ " to " ++ show newValue -- debug
+        -- debug $ " setting " ++ varName ++ " to " ++ show newValue -- debug
         env <- liftIO $ readIORef envIORef
         maybe (throwError $ UnboundVar "cannot set unbound variable" varName) (liftIO . (setExistingVar newValue)) (lookup varName env)
 
 -- same as setVar except if var doesn't exist, creates it
 defineVar :: EnvIORef -> String -> LispVal -> ThrowsErrorIO LispVal
 defineVar envIORef varName newValue = do
-        -- liftIO $ putStrLn $ " setting " ++ varName ++ " to " ++ show newValue -- debug
+        -- debug $ " setting " ++ varName ++ " to " ++ show newValue -- debug
         env <- liftIO $ readIORef envIORef
         maybe (liftIO $ createAndSetNewVar env) (liftIO . (setExistingVar newValue)) (lookup varName env)
         where
