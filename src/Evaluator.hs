@@ -1,11 +1,16 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 module Evaluator where
 
 import Types
 import Control.Monad.Error
 import Data.Char (toLower)
 import Control.Applicative ((<*>))
+import Control.Exception
 import Monad
 import Data.Maybe (fromJust)
+import System.IO
+import System.IO.Error (isAlreadyInUseError, isDoesNotExistError)
+import Parser
 
 -- TODO: add print, apply, eval, with-open-file, atom, funcall, cons, cond, case, append, backquoted list
 
@@ -91,6 +96,7 @@ makeLambdaFunc x     _  = throwError (NumArgsMismatch "2" x)
 -- Note: args passed in should be already evaluated
 evalFunc :: LispVal -> [LispVal] -> ThrowsErrorIO LispVal
 evalFunc (PrimitiveFunc func) args = liftThrowsError $ func args
+evalFunc (IOFunc ioFunc) args = ioFunc args
 evalFunc (Func reqParams optParams restParam funcBody closure) args = bindReqParamsInClosure >>
                                                                       bindOptParamsInClosure >>
                                                                       bindRestParamInClosure >>
@@ -324,6 +330,55 @@ weak_equal m@[x, y] = return . Bool . any id  =<< (liftM (:) eqlResult) <*> mapM
                             primitiveEqualityFunctions :: [Extractor]
                             primitiveEqualityFunctions = [Extractor extractBool, Extractor extractString, Extractor extractNumber]
 weak_equal _ = return $ Bool False
+
+ioPrimitives :: [(String, ([LispVal] -> ThrowsErrorIO LispVal))]
+ioPrimitives = [
+                ("open",            open),
+                ("read",            readFunc)
+               ]
+
+-- only supports :direction :input, :direction :output and :direction :io at the moment
+open :: [LispVal] -> ThrowsErrorIO LispVal
+open [] = throwError (NumArgsMismatch ">= 1" [])
+open [x@(String _)] = createInputFileStream x
+open (x@(String _):Atom ":direction":Atom ":input":_) = createInputFileStream x
+open (x@(String _):Atom ":direction":Atom ":output":_) = createOutputFileStream x
+open (x@(String _):Atom ":direction":Atom ":io":_) = createIOFileStream x
+open x = throwError (TypeMismatch "String" (head x))
+
+createInputFileStream :: LispVal -> ThrowsErrorIO LispVal
+createInputFileStream = createFileStream ReadMode
+
+createOutputFileStream :: LispVal -> ThrowsErrorIO LispVal
+createOutputFileStream = createFileStream WriteMode
+
+createIOFileStream :: LispVal -> ThrowsErrorIO LispVal
+createIOFileStream = createFileStream ReadWriteMode
+
+createFileStream :: IOMode -> LispVal -> ThrowsErrorIO LispVal
+createFileStream ioMode (String filePath) =  openfile filePath ioMode >>= \x ->
+        case x of
+            Left err -> throwError (Default err)
+            Right h -> return $ FileStream h
+createFileStream _ x = throwError (TypeMismatch "String" x)
+
+-- catch IOError thrown by System.IO openFile and return informative message for throwError
+openfile :: String -> IOMode -> ThrowsErrorIO (Either String Handle)
+openfile filePath ioMode = liftIO $ catch
+                                    (liftM Right $ openFile filePath ioMode)
+                                    (\(e :: IOException) -> if (isAlreadyInUseError e) then
+                                                                return (Left $ "file " ++ filePath ++ " already in use")
+                                                            else if (isDoesNotExistError e) then
+                                                                return (Left $ "file " ++ filePath ++ " does not exist")
+                                                            else -- isPermissionError
+                                                                return (Left $ "no permission to open file " ++ filePath))
+
+-- read is given a stream. it reads from the stream and creates an object that that data represents
+-- it does nothing to the environment
+readFunc :: [LispVal] -> ThrowsErrorIO LispVal
+readFunc [] = readFunc [FileStream stdin]
+readFunc [FileStream x] = (liftIO $ hGetLine x) >>= liftThrowsError . parseSingleExpr
+readFunc x = throwError (TypeMismatch "FileStream or []" (head x))
 
 --------------------------------------
 -- helper functions

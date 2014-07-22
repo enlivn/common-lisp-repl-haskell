@@ -4,8 +4,6 @@ import Data.IORef
 import Types
 import Control.Monad.Error
 
-type ThrowsErrorIO = ErrorT LispError IO
-
 debug :: String -> ThrowsErrorIO ()
 debug = liftIO . putStrLn
 

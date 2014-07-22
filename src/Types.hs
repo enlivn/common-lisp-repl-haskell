@@ -4,12 +4,15 @@ module Types where
 import Text.ParserCombinators.Parsec hiding (spaces)
 import Control.Monad.Error
 import Data.IORef
+import System.IO (Handle)
 
 type Env = [(String, IORef LispVal)]
 
 type EnvIORef = IORef Env
 
 type ThrowsError = Either LispError
+
+type ThrowsErrorIO = ErrorT LispError IO
 
 -- An Atom is a letter or symbol followed by any number of letters, digits,
 -- or symbols
@@ -25,7 +28,9 @@ data LispVal =  Atom String |
                       optionalParams :: Maybe [String],
                       restParams :: Maybe String,
                       body :: [LispVal],
-                      closureEnv :: EnvIORef} -- the function carries around its own environment with bound params. this gives us lexical scoping
+                      closureEnv :: EnvIORef} | -- the function carries around its own environment with bound params. this gives us lexical scoping
+                FileStream Handle |
+                IOFunc ([LispVal] -> ThrowsErrorIO LispVal)
 
 data LispError = NumArgsMismatch String [LispVal] |
                  TypeMismatch String LispVal |
@@ -56,6 +61,8 @@ instance Show LispVal where
                                         Nothing -> ""
                                         Just x -> " &rest(" ++ x ++ ") ")
                                 ++ " ...)"
+    show (FileStream _) = "<filestream>"
+    show (IOFunc _) = "<io function>"
 
 showLispValList :: [LispVal] -> String
 showLispValList = unwords . map show
