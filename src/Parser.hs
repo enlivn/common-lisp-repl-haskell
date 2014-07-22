@@ -11,11 +11,11 @@ parseExpr inp = case parse parseExpr' "lisp" inp of
 
 parseExpr' :: Parser LispVal
 parseExpr' = try parseSpecialAtom <|>
-            try parseNumber <|>
-            parseAtom <|>
-            parseString <|>
-            parseSingleQuoted <|>
-            parseListCommon
+             try parseNumber <|>
+             parseAtom <|>
+             parseString <|>
+             parseSingleQuoted <|>
+             parseListCommon
 
 -- functions "1+" and "1-"
 parseSpecialAtom :: Parser LispVal

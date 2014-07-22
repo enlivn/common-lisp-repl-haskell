@@ -31,7 +31,7 @@ initializeEnv :: IO EnvIORef
 initializeEnv = newIORef [] -- newIORef :: a -> IO (IORef a)
 
 runRepl :: EnvIORef -> IO ()
-runRepl envIORef = loop_ (promptAndReadInput "clisp>> ") (== "quit") (evalAndPrintRawAndPlainExpr envIORef)
+runRepl envIORef = loop_ (promptAndReadInput "clisp>> ") (== "quit") (evalAndPrintExpr envIORef)
 
 loop_ :: Monad m => m a -> (a -> Bool) -> (a -> m()) -> m ()
 loop_ promptFunc terminatePredicate action = do
@@ -46,20 +46,20 @@ promptAndReadInput :: String -> IO String
 promptAndReadInput msg = outputStr msg >> getLine
 
 evalAndPrintRawAndPlainExpr :: EnvIORef -> String -> IO ()
-evalAndPrintRawAndPlainExpr envIORef x = evalAndPrintRawExpr [x] >> evalAndPrintExpr envIORef [x]
+evalAndPrintRawAndPlainExpr envIORef x = evalAndPrintRawExpr x >> evalAndPrintExpr envIORef x
 
-evalAndPrintExpr :: EnvIORef -> [String] -> IO ()
+evalAndPrintExpr :: EnvIORef -> String -> IO ()
 evalAndPrintExpr envIORef expr = evalExpr envIORef expr >>= outputStrLn
 
-evalExpr :: EnvIORef -> [String] -> IO String
-evalExpr envIORef str = runThrowsErrorIO $ (liftM show . eval envIORef) =<< (liftThrowsError $ parseExpr $ str !! 0)
+evalExpr :: EnvIORef -> String -> IO String
+evalExpr envIORef str = runThrowsErrorIO $ (liftM show . eval envIORef) =<< (liftThrowsError $ parseExpr $ str)
 
 -- used for debugging to see parse result
-evalAndPrintRawExpr :: [String] -> IO ()
+evalAndPrintRawExpr :: String -> IO ()
 evalAndPrintRawExpr = (outputStrLn . evalRawExpr)
 
-evalRawExpr :: [String] -> String
-evalRawExpr = parseExprRaw . (!! 0)
+evalRawExpr :: String -> String
+evalRawExpr = parseExprRaw
 
 outputStr :: String -> IO ()
 outputStr msg = putStr msg >> hFlush stdout

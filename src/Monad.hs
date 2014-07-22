@@ -31,24 +31,38 @@ getVar envIORef varName = do
 -- throws UnboundVar error if var does not exist
 setVar :: EnvIORef -> String -> LispVal -> ThrowsErrorIO LispVal
 setVar envIORef varName newValue = do
-        -- debug $ " setting " ++ varName ++ " to " ++ show newValue -- debug
+        -- debug $ " setting " ++ varName ++ " to " ++ show newValue
         env <- liftIO $ readIORef envIORef
-        maybe (throwError $ UnboundVar "cannot set unbound variable" varName) (liftIO . (setExistingVar newValue)) (lookup varName env)
-
--- same as setVar except if var doesn't exist, creates it
-defineVar :: EnvIORef -> String -> LispVal -> ThrowsErrorIO LispVal
-defineVar envIORef varName newValue = do
-        -- debug $ " setting " ++ varName ++ " to " ++ show newValue -- debug
-        env <- liftIO $ readIORef envIORef
-        maybe (liftIO $ createAndSetNewVar env) (liftIO . (setExistingVar newValue)) (lookup varName env)
-        where
-            createAndSetNewVar :: Env -> IO LispVal
-            createAndSetNewVar env = do
-                newCreatedValue <- newIORef newValue
-                writeIORef envIORef (env ++ [(varName, newCreatedValue)]) >> readIORef newCreatedValue -- writeIORef :: IORef a -> a -> IO ()
+        case lookup varName env of
+            Nothing -> throwError $ UnboundVar "cannot set unbound variable" varName
+            Just _ -> liftIO $ setExistingVar envIORef varName newValue
 
 bindMultipleVars :: EnvIORef -> [(String, LispVal)] -> ThrowsErrorIO EnvIORef
-bindMultipleVars envIORef bindings = mapM (uncurry $ defineVar envIORef) bindings >> return envIORef
+bindMultipleVars envIORef bindings = mapM (uncurry $ setOrCreateVar envIORef) bindings >> return envIORef
 
-setExistingVar :: LispVal -> IORef LispVal -> IO LispVal
-setExistingVar newValue x = liftIO (writeIORef x newValue) >> readIORef x
+-- same as setVar except if var doesn't exist, creates it
+setOrCreateVar :: EnvIORef -> String -> LispVal -> ThrowsErrorIO LispVal
+setOrCreateVar envIORef varName newValue = do
+        -- debug $ " setting " ++ varName ++ " to " ++ show newValue
+        env <- liftIO $ readIORef envIORef
+        case lookup varName env of
+            Nothing -> liftIO $ createAndSetNewVar envIORef varName newValue
+            Just _ -> liftIO $ setExistingVar envIORef varName newValue
+
+copyEnv ::EnvIORef -> ThrowsErrorIO EnvIORef
+copyEnv e = liftIO $ readIORef e >>= newIORef
+
+setExistingVar :: EnvIORef -> String -> LispVal -> IO LispVal
+setExistingVar envIORef varName newValue = do
+    removeExistingBinding >>= \x -> createAndSetNewVar x varName newValue
+    where
+        removeExistingBinding :: IO EnvIORef
+        removeExistingBinding = do
+            env <- readIORef envIORef
+            writeIORef envIORef (filter (\(x,_) -> x /= varName) env) >> return envIORef
+
+createAndSetNewVar :: EnvIORef -> String -> LispVal -> IO LispVal
+createAndSetNewVar envIORef varName newValue = do
+        env <- liftIO $ readIORef envIORef
+        newCreatedValue <- newIORef newValue
+        writeIORef envIORef ([(varName, newCreatedValue)] ++ env) >> readIORef newCreatedValue -- writeIORef :: IORef a -> a -> IO ()
