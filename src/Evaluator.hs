@@ -11,6 +11,7 @@ import Data.Maybe (fromJust)
 import System.IO
 import System.IO.Error (isAlreadyInUseError, isDoesNotExistError)
 import Parser
+import Prelude hiding (read)
 
 -- TODO: add print, apply, eval, with-open-file, atom, funcall, cons, cond, case, append, backquoted list
 
@@ -33,6 +34,7 @@ eval envIORef (List [Atom "if", predicate, thenForm, elseForm]) = (eval envIORef
 eval envIORef (List (Atom "setq":newValue)) = evalSetq envIORef newValue
 eval envIORef (List (Atom "lambda":paramsAndBody)) = makeLambdaFunc paramsAndBody envIORef
 eval envIORef (List (Atom "defun":nameAndParamsAndBody)) = defun nameAndParamsAndBody envIORef
+eval envIORef (List (Atom "load":loadArgs)) = loadFunc envIORef loadArgs
 eval envIORef (List (func:args)) = do
     evaledFunc <- eval envIORef func
     evaledArgs <- mapM (eval envIORef) args
@@ -154,6 +156,15 @@ evalFunc x _ = throwError (TypeMismatch "Function" x)
 defun :: [LispVal] -> EnvIORef -> ThrowsErrorIO LispVal
 defun (Atom funcName:paramsAndBody) envIORef = setOrCreateVar envIORef funcName =<< makeLambdaFunc paramsAndBody envIORef
 defun x _ = throwError (NumArgsMismatch "2" x)
+
+loadFunc :: EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
+loadFunc _ [] = throwError (NumArgsMismatch "1" [])
+loadFunc envIORef x@[String _] = (open x) >>= readFileStream >>= liftThrowsError . parseListOfExpr >>= mapM (eval envIORef) >>= return . last -- return last form
+    where
+        readFileStream :: LispVal -> ThrowsErrorIO String
+        readFileStream (FileStream h) = liftIO $ hGetContents h
+        readFileStream y = throwError (TypeMismatch "FileStream" y)
+loadFunc _ x = throwError (TypeMismatch "String" (head x))
 
 -- primitive functions
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -334,7 +345,8 @@ weak_equal _ = return $ Bool False
 ioPrimitives :: [(String, ([LispVal] -> ThrowsErrorIO LispVal))]
 ioPrimitives = [
                 ("open",            open),
-                ("read",            readFunc)
+                ("close",           close),
+                ("read",            read)
                ]
 
 -- only supports :direction :input, :direction :output and :direction :io at the moment
@@ -346,12 +358,15 @@ open (x@(String _):Atom ":direction":Atom ":output":_) = createOutputFileStream 
 open (x@(String _):Atom ":direction":Atom ":io":_) = createIOFileStream x
 open x = throwError (TypeMismatch "String" (head x))
 
+-- takes a String representing a filepath
 createInputFileStream :: LispVal -> ThrowsErrorIO LispVal
 createInputFileStream = createFileStream ReadMode
 
+-- takes a String representing a filepath
 createOutputFileStream :: LispVal -> ThrowsErrorIO LispVal
 createOutputFileStream = createFileStream WriteMode
 
+-- takes a String representing a filepath
 createIOFileStream :: LispVal -> ThrowsErrorIO LispVal
 createIOFileStream = createFileStream ReadWriteMode
 
@@ -373,12 +388,18 @@ openfile filePath ioMode = liftIO $ catch
                                                             else -- isPermissionError
                                                                 return (Left $ "no permission to open file " ++ filePath))
 
+-- in this implementation, closing an already closed stream is not an error
+close :: [LispVal] -> ThrowsErrorIO LispVal
+close [] = throwError (NumArgsMismatch "1" [])
+close [FileStream x] = liftIO $ hClose x >> return (Bool True)
+close x = throwError (TypeMismatch "FileStream" (head x))
+
 -- read is given a stream. it reads from the stream and creates an object that that data represents
 -- it does nothing to the environment
-readFunc :: [LispVal] -> ThrowsErrorIO LispVal
-readFunc [] = readFunc [FileStream stdin]
-readFunc [FileStream x] = (liftIO $ hGetLine x) >>= liftThrowsError . parseSingleExpr
-readFunc x = throwError (TypeMismatch "FileStream or []" (head x))
+read :: [LispVal] -> ThrowsErrorIO LispVal
+read [] = read [FileStream stdin]
+read [FileStream x] = (liftIO $ hGetLine x) >>= liftThrowsError . parseSingleExpr
+read x = throwError (TypeMismatch "FileStream or []" (head x))
 
 --------------------------------------
 -- helper functions
