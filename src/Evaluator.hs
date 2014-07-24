@@ -17,6 +17,7 @@ import Prelude hiding (read)
 
 eval :: EnvIORef -> LispVal -> ThrowsErrorIO LispVal
 -- primitives
+eval _ x@(Keyword _) = return x
 eval _ x@(String _) = return x
 eval _ x@(Number _) = return x
 eval _ x@(Bool _) = return x
@@ -35,6 +36,7 @@ eval envIORef (List (Atom "setq":newValue)) = evalSetq envIORef newValue
 eval envIORef (List (Atom "lambda":paramsAndBody)) = makeLambdaFunc paramsAndBody envIORef
 eval envIORef (List (Atom "defun":nameAndParamsAndBody)) = defun nameAndParamsAndBody envIORef
 eval envIORef (List (Atom "load":loadArgs)) = loadFile envIORef loadArgs
+eval envIORef (List (Atom "prin1":prin1Args)) = prin1 envIORef prin1Args
 eval envIORef (List (func:args)) = do
     evaledFunc <- eval envIORef func
     evaledArgs <- mapM (eval envIORef) args
@@ -46,7 +48,7 @@ eval envIORef (List (func:args)) = do
 evalSetq :: EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
 evalSetq envIORef l | length l /= 2 = throwError (NumArgsMismatch "2" l)
                     | otherwise = case l of
-                        [Atom varName, value] -> setOrCreateVar envIORef varName value
+                        [Atom varName, value] -> setOrCreateVar envIORef varName =<< eval envIORef value
                         x -> throwError (TypeMismatch "Atom" (head x))
 
 --------------------------------------
@@ -63,6 +65,9 @@ makeLambdaFunc (List funcParams:funcBody) envIORef = do
           notRestAtom (Atom "&rest") = False
           notRestAtom _ = True
 
+          -- note that the &optional lambda-list parameter is only used when defining a function (as in the lambda here
+          -- or in a defun). When you call the function, you do NOT provide an &optional atom but simply provide the
+          -- associated value instead.
           notOptionalAtom :: LispVal -> Bool
           notOptionalAtom (Atom "&optional") = False
           notOptionalAtom _ = True
@@ -164,9 +169,9 @@ defun x _ = throwError (NumArgsMismatch "2" x)
 loadFile :: EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
 loadFile _ [] = throwError (NumArgsMismatch "1" [])
 loadFile envIORef x@[String _] = (open x) >>= readFileStream >>= liftThrowsError . parseListOfExpr >>= mapM (eval envIORef) >>= return . last -- return last form
-loadFile envIORef [x@(String _), Atom ":if-does-not-exist", Bool False] = (loadInputFileStream envIORef (Bool False) x)
-loadFile envIORef [x@(String _), Atom ":if-does-not-exist", _] = (loadInputFileStream envIORef (Bool True) x)
-loadFile _ x@[String _, Atom ":if-does-not-exist"] = throwError (NumArgsMismatch "3" x)
+loadFile envIORef [x@(String _), Keyword ":if-does-not-exist", Bool False] = (loadInputFileStream envIORef (Bool False) x)
+loadFile envIORef [x@(String _), Keyword ":if-does-not-exist", _] = (loadInputFileStream envIORef (Bool True) x)
+loadFile _ x@[String _, Keyword ":if-does-not-exist"] = throwError (NumArgsMismatch "3" x)
 loadFile _ x = throwError (TypeMismatch "String" (head x))
 
 loadInputFileStream :: EnvIORef -> LispVal -> LispVal -> ThrowsErrorIO LispVal
@@ -373,9 +378,9 @@ ioPrimitives = [
 open :: [LispVal] -> ThrowsErrorIO LispVal
 open [] = throwError (NumArgsMismatch ">= 1" [])
 open [x@(String _)] = createInputFileStream x
-open (x@(String _):Atom ":direction":Atom ":input":_) = createInputFileStream x
-open (x@(String _):Atom ":direction":Atom ":output":_) = createOutputFileStream x
-open (x@(String _):Atom ":direction":Atom ":io":_) = createIOFileStream x
+open [x@(String _),Keyword ":direction",Keyword ":input"] = createInputFileStream x
+open [x@(String _),Keyword ":direction",Keyword ":output"] = createOutputFileStream x
+open [x@(String _),Keyword ":direction",Keyword ":io"] = createIOFileStream x
 open x = throwError (TypeMismatch "String" (head x))
 
 -- takes a String representing a filepath
@@ -425,6 +430,18 @@ read :: [LispVal] -> ThrowsErrorIO LispVal
 read [] = read [FileStream stdin]
 read [FileStream x] = (liftIO $ hGetLine x) >>= liftThrowsError . parseSingleExpr
 read x = throwError (TypeMismatch "FileStream or []" (head x))
+
+prin1 :: EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
+prin1 _ [x] = liftIO $ hPutStr stdout (show x) >> return x
+prin1 envIORef [x, y] = (eval envIORef y) >>= prin1'
+    where prin1' :: LispVal -> ThrowsErrorIO LispVal
+          prin1' (FileStream h) = do
+            isFileWritable <- liftIO $ hIsWritable h
+            if isFileWritable then liftIO $ hPutStr h (show x) >> return x
+            else throwError (Default "not an output stream")
+          prin1' (List _) = throwError (Default "hiho")
+          prin1' z = throwError (TypeMismatch "FileStream" z)
+prin1 _ _ = throwError (Default "incorrect parameters for prin1")
 
 --------------------------------------
 -- helper functions

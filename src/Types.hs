@@ -18,6 +18,7 @@ type ThrowsErrorIO = ErrorT LispError IO
 -- or symbols
 -- A DottedList is the CAR-CADR type Lisp list
 data LispVal =  Atom String |
+                Keyword String |
                 Number Integer |
                 Bool Bool |
                 String String |
@@ -44,6 +45,7 @@ data Extractor = forall a . Eq a => Extractor (LispVal -> ThrowsError a)
 -- Used to print values
 instance Show LispVal where
     show (Atom a) = a
+    show (Keyword a) = a
     show (Number n) = show n
     show (Bool True) = "t"
     show (Bool False) = "NIL"

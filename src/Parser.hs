@@ -8,7 +8,7 @@ parseSingleExpr :: String -> ThrowsError LispVal
 parseSingleExpr = parseExpression lispParser
 
 parseListOfExpr :: String -> ThrowsError [LispVal]
-parseListOfExpr = parseExpression (endBy lispParser ignoreSpaces)
+parseListOfExpr = parseExpression (sepEndBy (skipMany space >> lispParser) (skipMany space))
 
 parseExpression :: Parser a -> String -> ThrowsError a
 parseExpression parser inp = case parse parser "lisp" inp of
@@ -50,6 +50,7 @@ parseAtom = do
     case atom of
         "t" -> return $ Bool True
         "nil" -> return $ Bool False
+        (':':_) -> return $ Keyword atom
         _ -> return $ Atom atom
 
 parseString :: Parser LispVal
