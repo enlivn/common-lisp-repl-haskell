@@ -34,7 +34,7 @@ eval envIORef (List [Atom "if", predicate, thenForm, elseForm]) = (eval envIORef
 eval envIORef (List (Atom "setq":newValue)) = evalSetq envIORef newValue
 eval envIORef (List (Atom "lambda":paramsAndBody)) = makeLambdaFunc paramsAndBody envIORef
 eval envIORef (List (Atom "defun":nameAndParamsAndBody)) = defun nameAndParamsAndBody envIORef
-eval envIORef (List (Atom "load":loadArgs)) = loadFunc envIORef loadArgs
+eval envIORef (List (Atom "load":loadArgs)) = loadFile envIORef loadArgs
 eval envIORef (List (func:args)) = do
     evaledFunc <- eval envIORef func
     evaledArgs <- mapM (eval envIORef) args
@@ -157,14 +157,34 @@ defun :: [LispVal] -> EnvIORef -> ThrowsErrorIO LispVal
 defun (Atom funcName:paramsAndBody) envIORef = setOrCreateVar envIORef funcName =<< makeLambdaFunc paramsAndBody envIORef
 defun x _ = throwError (NumArgsMismatch "2" x)
 
-loadFunc :: EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
-loadFunc _ [] = throwError (NumArgsMismatch "1" [])
-loadFunc envIORef x@[String _] = (open x) >>= readFileStream >>= liftThrowsError . parseListOfExpr >>= mapM (eval envIORef) >>= return . last -- return last form
-    where
-        readFileStream :: LispVal -> ThrowsErrorIO String
-        readFileStream (FileStream h) = liftIO $ hGetContents h
-        readFileStream y = throwError (TypeMismatch "FileStream" y)
-loadFunc _ x = throwError (TypeMismatch "String" (head x))
+-- loads file. this has an effect on the environment (unlike read)
+-- if file is not found and
+--   a. :if-does-not-exist is nil: nil is returned
+--   b. else, an error is shown
+loadFile :: EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
+loadFile _ [] = throwError (NumArgsMismatch "1" [])
+loadFile envIORef x@[String _] = (open x) >>= readFileStream >>= liftThrowsError . parseListOfExpr >>= mapM (eval envIORef) >>= return . last -- return last form
+loadFile envIORef [x@(String _), Atom ":if-does-not-exist", Bool False] = (loadInputFileStream envIORef (Bool False) x)
+loadFile envIORef [x@(String _), Atom ":if-does-not-exist", _] = (loadInputFileStream envIORef (Bool True) x)
+loadFile _ x@[String _, Atom ":if-does-not-exist"] = throwError (NumArgsMismatch "3" x)
+loadFile _ x = throwError (TypeMismatch "String" (head x))
+
+loadInputFileStream :: EnvIORef -> LispVal -> LispVal -> ThrowsErrorIO LispVal
+loadInputFileStream envIORef ifDoesNotExistVal = createFileStreamForLoad envIORef ifDoesNotExistVal ReadMode
+
+createFileStreamForLoad :: EnvIORef -> LispVal -> IOMode -> LispVal -> ThrowsErrorIO LispVal
+createFileStreamForLoad envIORef ifDoesNotExistVal = createFileStream (exceptionHandlerForLoad envIORef ifDoesNotExistVal)
+
+exceptionHandlerForLoad :: EnvIORef -> LispVal -> ((Either String Handle) -> ThrowsErrorIO LispVal)
+exceptionHandlerForLoad envIORef (Bool ifDoesNotExistVal) x = case x of
+                                                        Left err -> if ifDoesNotExistVal then throwError (Default err)
+                                                                    else return (Bool False)
+                                                        Right h -> (liftIO $ hGetContents h) >>= liftThrowsError . parseListOfExpr >>= mapM (eval envIORef) >>= return . last -- return last form
+exceptionHandlerForLoad _ x _ = throwError (TypeMismatch "Bool" x)
+
+readFileStream :: LispVal -> ThrowsErrorIO String
+readFileStream (FileStream h) = liftIO $ hGetContents h
+readFileStream y = throwError (TypeMismatch "FileStream" y)
 
 -- primitive functions
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -360,24 +380,29 @@ open x = throwError (TypeMismatch "String" (head x))
 
 -- takes a String representing a filepath
 createInputFileStream :: LispVal -> ThrowsErrorIO LispVal
-createInputFileStream = createFileStream ReadMode
+createInputFileStream = createFileStreamForOpen ReadMode
 
 -- takes a String representing a filepath
 createOutputFileStream :: LispVal -> ThrowsErrorIO LispVal
-createOutputFileStream = createFileStream WriteMode
+createOutputFileStream = createFileStreamForOpen WriteMode
 
 -- takes a String representing a filepath
 createIOFileStream :: LispVal -> ThrowsErrorIO LispVal
-createIOFileStream = createFileStream ReadWriteMode
+createIOFileStream = createFileStreamForOpen ReadWriteMode
 
-createFileStream :: IOMode -> LispVal -> ThrowsErrorIO LispVal
-createFileStream ioMode (String filePath) =  openfile filePath ioMode >>= \x ->
-        case x of
-            Left err -> throwError (Default err)
-            Right h -> return $ FileStream h
-createFileStream _ x = throwError (TypeMismatch "String" x)
+createFileStreamForOpen :: IOMode -> LispVal -> ThrowsErrorIO LispVal
+createFileStreamForOpen = createFileStream exceptionHandlerForOpen
 
--- catch IOError thrown by System.IO openFile and return informative message for throwError
+exceptionHandlerForOpen :: ((Either String Handle) -> ThrowsErrorIO LispVal)
+exceptionHandlerForOpen x = case x of
+                                Left err -> throwError (Default err)
+                                Right h -> return $ FileStream h
+
+createFileStream :: ((Either String Handle) -> ThrowsErrorIO LispVal) -> IOMode -> LispVal -> ThrowsErrorIO LispVal
+createFileStream handler ioMode (String filePath) =  openfile filePath ioMode >>= handler
+createFileStream _ _ x = throwError (TypeMismatch "String" x)
+
+-- catch IOError thrown by System.IO openFile and return informative message for throwError within the ThrowsErrorIO monad
 openfile :: String -> IOMode -> ThrowsErrorIO (Either String Handle)
 openfile filePath ioMode = liftIO $ catch
                                     (liftM Right $ openFile filePath ioMode)
