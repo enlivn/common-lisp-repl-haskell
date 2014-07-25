@@ -13,7 +13,7 @@ import System.IO.Error (isAlreadyInUseError, isDoesNotExistError)
 import Parser
 import Prelude hiding (read)
 
--- TODO: add print, apply, eval, with-open-file, atom, funcall, cons, cond, case, append, backquoted list
+-- TODO: add print, apply, eval, with-open-file, atom, funcall, cond, case, append, backquoted list
 
 eval :: EnvIORef -> EnvIORef -> LispVal -> ThrowsErrorIO LispVal
 -- primitives
@@ -38,12 +38,15 @@ eval envIORef funcEnvIORef (List (Atom "lambda":paramsAndBody))              = m
 eval envIORef funcEnvIORef (List (Atom "defun":nameAndParamsAndBody))        = defun nameAndParamsAndBody envIORef funcEnvIORef
 eval envIORef funcEnvIORef (List (Atom "load":loadArgs))                     = loadFile envIORef funcEnvIORef loadArgs
 eval envIORef funcEnvIORef (List (Atom "prin1":prin1Args))                   = prin1 envIORef funcEnvIORef prin1Args
-eval envIORef funcEnvIORef (List (Atom func:args))                           = do
-                                                                                evaledFunc <- getVar funcEnvIORef func -- lookup functions in the func namespace
+eval envIORef funcEnvIORef (List (func:args))                                = do
+                                                                                evaledFunc <- getFunc func
                                                                                 evaledArgs <- mapM (eval envIORef funcEnvIORef ) args
                                                                                 -- note we don't pass in the environment here because
                                                                                 -- a function carries its own lexical environment
                                                                                 evalFunc evaledFunc evaledArgs
+                                                                                where getFunc :: LispVal -> ThrowsErrorIO LispVal
+                                                                                      getFunc (Atom x) = getVar funcEnvIORef x -- lookup symbols in the func namespace
+                                                                                      getFunc x = eval envIORef funcEnvIORef x
 
 --------------------------------------
 -- Setq evaluation
@@ -189,9 +192,12 @@ createFileStreamForLoad envIORef funcEnvIORef ifDoesNotExistVal = createFileStre
 
 exceptionHandlerForLoad :: EnvIORef -> EnvIORef -> LispVal -> ((Either String Handle) -> ThrowsErrorIO LispVal)
 exceptionHandlerForLoad envIORef funcEnvIORef (Bool ifDoesNotExistVal) x = case x of
-                                                        Left err -> if ifDoesNotExistVal then throwError (Default err)
-                                                                    else return (Bool False)
-                                                        Right h -> (liftIO $ hGetContents h) >>= liftThrowsError . parseListOfExpr >>= mapM (eval envIORef funcEnvIORef) >>= return . last -- return last form
+                                                                            Left err -> if ifDoesNotExistVal then throwError (Default err)
+                                                                                        else return (Bool False)
+                                                                            Right h -> (liftIO $ hGetContents h) >>=
+                                                                                       liftThrowsError . parseListOfExpr >>=
+                                                                                       mapM (eval envIORef funcEnvIORef) >>=
+                                                                                       return . last -- return last form
 exceptionHandlerForLoad _ _ x _ = throwError (TypeMismatch "Bool" x)
 
 readFileStream :: LispVal -> ThrowsErrorIO String
