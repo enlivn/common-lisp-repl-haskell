@@ -13,7 +13,7 @@ import System.IO.Error (isAlreadyInUseError, isDoesNotExistError)
 import Parser
 import Prelude hiding (read)
 
--- TODO: add apply, eval, with-open-file, atom, funcall, cond, case, append, backquoted list
+-- TODO: add eval, with-open-file, funcall, cond, case, append, backquoted list
 
 eval :: EnvIORef -> EnvIORef -> LispVal -> ThrowsErrorIO LispVal
 -- primitives
@@ -34,11 +34,12 @@ eval envIORef funcEnvIORef (List [Atom "if", predicate, thenForm, elseForm]) = (
                                                                                     _ -> throwError $ Default "if predicate did not evaluate to a boolean value"
 -- functions
 eval envIORef funcEnvIORef (List (Atom "setq":newValue))                     = evalSetq envIORef funcEnvIORef newValue
+eval envIORef funcEnvIORef (List (Atom "apply":funcParamsAndBody))           = apply envIORef funcEnvIORef funcParamsAndBody
 eval envIORef funcEnvIORef (List (Atom "lambda":paramsAndBody))              = makeLambdaFunc paramsAndBody envIORef funcEnvIORef
 eval envIORef funcEnvIORef (List (Atom "defun":nameAndParamsAndBody))        = defun nameAndParamsAndBody envIORef funcEnvIORef
 eval envIORef funcEnvIORef (List (Atom "load":loadArgs))                     = loadFile envIORef funcEnvIORef loadArgs
-eval envIORef funcEnvIORef (List (Atom "prin1":prin1Args))                   = prin1 envIORef funcEnvIORef prin1Args
-eval envIORef funcEnvIORef (List (Atom "print":printArgs))                   = printFunc envIORef funcEnvIORef printArgs
+eval envIORef funcEnvIORef (List (Atom "prin1":prin1Args))                   = prin1 envIORef funcEnvIORef =<< mapM (eval envIORef funcEnvIORef) prin1Args
+eval envIORef funcEnvIORef (List (Atom "print":printArgs))                   = printFunc envIORef funcEnvIORef =<< mapM (eval envIORef funcEnvIORef) printArgs
 eval envIORef funcEnvIORef (List (func:args))                                = do
                                                                                 evaledFunc <- getFunc func
                                                                                 evaledArgs <- mapM (eval envIORef funcEnvIORef ) args
@@ -121,6 +122,7 @@ evalFunc (Func reqParams optParams restParam funcBody closure funcEnvIORef) args
     where
         bindReqParamsInClosure :: ThrowsErrorIO EnvIORef
         bindReqParamsInClosure | length reqParams > length args = throwError (NumArgsMismatch (">= " ++ (show . length) reqParams) args)
+                               | length args > length reqParams && (optParams == Nothing) = throwError (NumArgsMismatch ((show . length) reqParams) args)
                                | otherwise = bindMultipleVars closure (zip reqParams args)
 
         listAfterReq :: [LispVal]
@@ -250,6 +252,7 @@ primitives = [
                 ("cdr", cdr),                                                     -- exactly one arg
                 ("cons", cons),                                                   -- exactly two args
                 ("eql", eql),                                                     -- exactly two args
+                ("atom", atom),                                                   -- exactly one arg
                 ("weak_equal", weak_equal)                                        -- NOT a common lisp function. equivalence ignoring types. exactly two args
              ]
 
@@ -351,7 +354,6 @@ eql [(Bool x), (Bool y)] = return $ Bool ((==) x y)
 eql [(String x), (String y)] = return $ Bool ((==) x y)
 eql [(List x), (List y)] | length x /= length y = return $ Bool False
                          | otherwise = return . Bool =<< liftM (all toBool) (mapM eql (zipIntoList x y))
-
 eql [(DottedList x1 x2), (DottedList y1 y2)] = eql [List (x1++[x2]), List (y1++[y2])]
 eql _ = return $ Bool $ False
 
@@ -381,6 +383,40 @@ weak_equal m@[x, y] = return . Bool . any id  =<< (liftM (:) eqlResult) <*> mapM
                             primitiveEqualityFunctions = [Extractor extractBool, Extractor extractString, Extractor extractNumber]
 weak_equal _ = return $ Bool False
 
+-- atom == not cons
+atom :: [LispVal] -> ThrowsError LispVal
+atom [List _] = return $ Bool False
+atom [DottedList _ _] = return $ Bool False
+atom [_] = return $ Bool True
+atom x = throwError (NumArgsMismatch "1" x)
+
+apply :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
+apply _ _ [] = throwError (NumArgsMismatch ">= 1" [])
+apply envIORef funcEnvIORef (functionDesignator:spreadableListDesignator) = (liftM (:) processFunctionDesignator) <*> processSpreadableListDesignator >>=
+                                                                            return . List >>=
+                                                                            eval envIORef funcEnvIORef
+    where processFunctionDesignator :: ThrowsErrorIO LispVal
+          processFunctionDesignator = eval envIORef funcEnvIORef functionDesignator
+
+          processSpreadableListDesignator :: ThrowsErrorIO [LispVal]
+          processSpreadableListDesignator = mapM (eval envIORef funcEnvIORef) spreadableListDesignator >>= expandSpreadableListDesignator >>= mapM f
+
+                                                where
+                                                    -- if the last element of the spreadable argument list is a list, extract and append those values
+                                                    -- if the last element of the spreadable argument list is a dotted list, extract and append its car
+                                                    -- if the last element of the spreadable argument list is anything else, ignore it
+                                                    expandSpreadableListDesignator :: [LispVal] -> ThrowsErrorIO [LispVal]
+                                                    expandSpreadableListDesignator list =
+                                                        if null list then return []
+                                                        else case last list of
+                                                                    (List y) -> return $ (init list) ++ y
+                                                                    (DottedList y _) -> return $ (init list) ++ y
+                                                                    _ -> return (init list)
+                                                    f :: LispVal -> ThrowsErrorIO LispVal
+                                                    f x = return $ List [Atom "quoted",x]
+
+-- IO primitive functions
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ioPrimitives :: [(String, ([LispVal] -> ThrowsErrorIO LispVal))]
 ioPrimitives = [
                 ("open",            open),
@@ -446,27 +482,27 @@ read [FileStream x] = (liftIO $ hGetLine x) >>= liftThrowsError . parseSingleExp
 read x = throwError (TypeMismatch "FileStream or []" (head x))
 
 prin1 :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
-prin1 _        _            [x]    = liftIO $ hPutStr stdout (show x) >> return x
-prin1 envIORef funcEnvIORef [x, y] = (eval envIORef funcEnvIORef y) >>= prin1'
+prin1 _ _ [obj] = liftIO $ hPutStr stdout (show obj) >> return obj
+prin1 envIORef funcEnvIORef [obj, filestream] = (eval envIORef funcEnvIORef filestream) >>= prin1'
                                         where prin1' :: LispVal -> ThrowsErrorIO LispVal
                                               prin1' (FileStream h) = do
                                                 isFileWritable <- liftIO $ hIsWritable h
-                                                if isFileWritable then liftIO $ hPutStr h (show x) >> return x
+                                                if isFileWritable then liftIO $ hPutStr h (show obj) >> return obj
                                                 else throwError (Default "not an output stream")
                                               prin1' z = throwError (TypeMismatch "FileStream" z)
-prin1 _        _            _      = throwError (Default "incorrect parameters for prin1")
+prin1 _ _ _ = throwError (Default "incorrect parameters for prin1")
 
 -- same as prin1 except prints a newline at the beginning and a space at the end
 printFunc :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
-printFunc _        _            [x]    = liftIO $ hPutStr stdout ("\n" ++ (show x) ++ " ") >> return x
-printFunc envIORef funcEnvIORef [x, y] = (eval envIORef funcEnvIORef y) >>= printFunc'
+printFunc _ _ [obj] = liftIO $ hPutStr stdout ("\n" ++ (show obj) ++ " ") >> return obj
+printFunc envIORef funcEnvIORef [obj, filestream] = (eval envIORef funcEnvIORef filestream) >>= printFunc'
                                         where printFunc' :: LispVal -> ThrowsErrorIO LispVal
                                               printFunc' (FileStream h) = do
                                                 isFileWritable <- liftIO $ hIsWritable h
-                                                if isFileWritable then liftIO $ hPutStr h ("\n" ++ (show x) ++ " ") >> return x
+                                                if isFileWritable then liftIO $ hPutStr h ("\n" ++ (show obj) ++ " ") >> return obj
                                                 else throwError (Default "not an output stream")
                                               printFunc' z = throwError (TypeMismatch "FileStream" z)
-printFunc _        _            _      = throwError (Default "incorrect parameters for print")
+printFunc _ _ _ = throwError (Default "incorrect parameters for print")
 
 --------------------------------------
 -- helper functions

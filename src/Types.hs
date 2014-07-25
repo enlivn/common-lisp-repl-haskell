@@ -53,6 +53,7 @@ instance Show LispVal where
     show (String s) = '"' : s ++ "\""
     show (List []) = "NIL"
     show (List l) = "(" ++ showLispValList l ++ ")"
+    show (DottedList h (Bool False)) = "(" ++ showLispValList h ++ ")"
     show (DottedList h t) = "(" ++ showLispValList h ++ " . " ++ show t ++ ")"
     show (PrimitiveFunc _) = "<primitive function>"
     show (Func reqParams optParams restParam _ _ _) = "(lambda required("

@@ -73,4 +73,4 @@ outputStr :: String -> IO ()
 outputStr msg = putStr msg >> hFlush stdout
 
 outputStrLn :: String -> IO ()
-outputStrLn msg = outputStr $ msg ++ "\n"
+outputStrLn msg = outputStr $ "\n" ++ msg ++ "\n"
