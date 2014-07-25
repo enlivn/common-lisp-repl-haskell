@@ -29,7 +29,8 @@ data LispVal =  Atom String |
                       optionalParams :: Maybe [String],
                       restParams :: Maybe String,
                       body :: [LispVal],
-                      closureEnv :: EnvIORef} | -- the function carries around its own environment with bound params. this gives us lexical scoping
+                      closureEnv :: EnvIORef,
+                      funcClosureEnv :: EnvIORef} | -- the function carries around its own environment with bound params. this gives us lexical scoping
                 FileStream Handle |
                 IOFunc ([LispVal] -> ThrowsErrorIO LispVal)
 
@@ -54,7 +55,7 @@ instance Show LispVal where
     show (List l) = "(" ++ showLispValList l ++ ")"
     show (DottedList h t) = "(" ++ showLispValList h ++ " . " ++ show t ++ ")"
     show (PrimitiveFunc _) = "<primitive function>"
-    show (Func reqParams optParams restParam _ _) = "(lambda required("
+    show (Func reqParams optParams restParam _ _ _) = "(lambda required("
                                 ++ unwords reqParams ++ ")"
                                 ++ (case optParams of
                                         Nothing -> ""

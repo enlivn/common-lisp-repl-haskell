@@ -12,9 +12,11 @@ import Data.IORef
 main :: IO ()
 main = do
   x <- getArgs
+  funcEnv <- bindPrimitiveFunctions
+  varEnv <- initializeEnv
   case (length x) of
-    0 -> runRepl =<< bindPrimitiveFunctions --no args = start up REPL
-    1 -> (flip evalAndPrintRawAndPlainExpr) (x !! 0) =<< bindPrimitiveFunctions -- single arg = evaluate as an expression
+    0 -> runRepl varEnv funcEnv --no args = start up REPL
+    1 -> evalAndPrintRawAndPlainExpr varEnv funcEnv (x !! 0) -- single arg = evaluate as an expression
     _ -> putStrLn "Error: Only 0 or 1 arguments allowed."
 
 --------------------------------------
@@ -36,8 +38,8 @@ bindPrimitiveFunctions =  bindMultipleVars' createIOPrimitiveBindingMap =<< bind
 initializeEnv :: IO EnvIORef
 initializeEnv = newIORef [] -- newIORef :: a -> IO (IORef a)
 
-runRepl :: EnvIORef -> IO ()
-runRepl envIORef = loop_ (promptAndReadInput "clisp>> ") (== "quit") (evalAndPrintExpr envIORef)
+runRepl :: EnvIORef -> EnvIORef -> IO ()
+runRepl envIORef funcEnvIORef = loop_ (promptAndReadInput "clisp>> ") (== "quit") (evalAndPrintExpr envIORef funcEnvIORef)
 
 loop_ :: Monad m => m a -> (a -> Bool) -> (a -> m()) -> m ()
 loop_ promptFunc terminatePredicate action = do
@@ -51,14 +53,14 @@ loop_ promptFunc terminatePredicate action = do
 promptAndReadInput :: String -> IO String
 promptAndReadInput msg = outputStr msg >> getLine
 
-evalAndPrintRawAndPlainExpr :: EnvIORef -> String -> IO ()
-evalAndPrintRawAndPlainExpr envIORef x = evalAndPrintRawExpr x >> evalAndPrintExpr envIORef x
+evalAndPrintRawAndPlainExpr :: EnvIORef -> EnvIORef -> String -> IO ()
+evalAndPrintRawAndPlainExpr envIORef funcEnvIORef x = evalAndPrintRawExpr x >> evalAndPrintExpr envIORef funcEnvIORef x
 
-evalAndPrintExpr :: EnvIORef -> String -> IO ()
-evalAndPrintExpr envIORef expr = evalExpr envIORef expr >>= outputStrLn
+evalAndPrintExpr :: EnvIORef -> EnvIORef -> String -> IO ()
+evalAndPrintExpr envIORef funcEnvIORef expr = evalExpr envIORef funcEnvIORef expr >>= outputStrLn
 
-evalExpr :: EnvIORef -> String -> IO String
-evalExpr envIORef str = runThrowsErrorIO $ (liftM show . eval envIORef) =<< (liftThrowsError $ parseSingleExpr $ str)
+evalExpr :: EnvIORef -> EnvIORef -> String -> IO String
+evalExpr envIORef funcEnvIORef str = runThrowsErrorIO $ (liftM show . eval envIORef funcEnvIORef) =<< (liftThrowsError $ parseSingleExpr $ str)
 
 -- used for debugging to see parse result
 evalAndPrintRawExpr :: String -> IO ()
