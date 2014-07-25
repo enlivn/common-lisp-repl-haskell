@@ -136,7 +136,7 @@ apply envIORef funcEnvIORef (functionDesignator:spreadableListDesignator) = (lif
           processFunctionDesignator = eval envIORef funcEnvIORef functionDesignator
 
           processSpreadableListDesignator :: ThrowsErrorIO [LispVal]
-          processSpreadableListDesignator = mapM (eval envIORef funcEnvIORef) spreadableListDesignator >>= expandSpreadableListDesignator >>= mapM f
+          processSpreadableListDesignator = mapM (eval envIORef funcEnvIORef) spreadableListDesignator >>= expandSpreadableListDesignator >>= mapM makeQuoted
 
                                                 where
                                                     -- if the last element of the spreadable argument list is a list, extract and append those values
@@ -149,8 +149,11 @@ apply envIORef funcEnvIORef (functionDesignator:spreadableListDesignator) = (lif
                                                                     (List y) -> return $ (init list) ++ y
                                                                     (DottedList y _) -> return $ (init list) ++ y
                                                                     _ -> return (init list)
-                                                    f :: LispVal -> ThrowsErrorIO LispVal
-                                                    f x = return $ List [Atom "quoted",x]
+
+                                                    -- we've already eval'ed the args, so make each evaled arg quoted so it won't be eval'ed
+                                                    -- when we finally evaluate this function in eval
+                                                    makeQuoted :: LispVal -> ThrowsErrorIO LispVal
+                                                    makeQuoted x = return $ List [Atom "quoted",x]
 
 -- lambda
 makeLambdaFunc :: [LispVal] -> EnvIORef -> EnvIORef -> ThrowsErrorIO LispVal
