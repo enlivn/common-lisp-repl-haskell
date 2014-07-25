@@ -13,7 +13,7 @@ import System.IO.Error (isAlreadyInUseError, isDoesNotExistError)
 import Parser
 import Prelude hiding (read)
 
--- TODO: add print, apply, eval, with-open-file, atom, funcall, cond, case, append, backquoted list
+-- TODO: add apply, eval, with-open-file, atom, funcall, cond, case, append, backquoted list
 
 eval :: EnvIORef -> EnvIORef -> LispVal -> ThrowsErrorIO LispVal
 -- primitives
@@ -38,6 +38,7 @@ eval envIORef funcEnvIORef (List (Atom "lambda":paramsAndBody))              = m
 eval envIORef funcEnvIORef (List (Atom "defun":nameAndParamsAndBody))        = defun nameAndParamsAndBody envIORef funcEnvIORef
 eval envIORef funcEnvIORef (List (Atom "load":loadArgs))                     = loadFile envIORef funcEnvIORef loadArgs
 eval envIORef funcEnvIORef (List (Atom "prin1":prin1Args))                   = prin1 envIORef funcEnvIORef prin1Args
+eval envIORef funcEnvIORef (List (Atom "print":printArgs))                   = printFunc envIORef funcEnvIORef printArgs
 eval envIORef funcEnvIORef (List (func:args))                                = do
                                                                                 evaledFunc <- getFunc func
                                                                                 evaledArgs <- mapM (eval envIORef funcEnvIORef ) args
@@ -452,9 +453,20 @@ prin1 envIORef funcEnvIORef [x, y] = (eval envIORef funcEnvIORef y) >>= prin1'
                                                 isFileWritable <- liftIO $ hIsWritable h
                                                 if isFileWritable then liftIO $ hPutStr h (show x) >> return x
                                                 else throwError (Default "not an output stream")
-                                              prin1' (List _) = throwError (Default "hiho")
                                               prin1' z = throwError (TypeMismatch "FileStream" z)
 prin1 _        _            _      = throwError (Default "incorrect parameters for prin1")
+
+-- same as prin1 except prints a newline at the beginning and a space at the end
+printFunc :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
+printFunc _        _            [x]    = liftIO $ hPutStr stdout ("\n" ++ (show x) ++ " ") >> return x
+printFunc envIORef funcEnvIORef [x, y] = (eval envIORef funcEnvIORef y) >>= printFunc'
+                                        where printFunc' :: LispVal -> ThrowsErrorIO LispVal
+                                              printFunc' (FileStream h) = do
+                                                isFileWritable <- liftIO $ hIsWritable h
+                                                if isFileWritable then liftIO $ hPutStr h ("\n" ++ (show x) ++ " ") >> return x
+                                                else throwError (Default "not an output stream")
+                                              printFunc' z = throwError (TypeMismatch "FileStream" z)
+printFunc _        _            _      = throwError (Default "incorrect parameters for print")
 
 --------------------------------------
 -- helper functions
