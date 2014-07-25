@@ -24,9 +24,10 @@ eval _        _            x@(Bool _)                                        = r
 eval envIORef _            (Atom x)                                          = getVar envIORef x
 eval envIORef funcEnvIORef (DottedList x y)                                  = eval envIORef funcEnvIORef  $ List [Atom "cons", List x, y]
 eval _        _            (List [])                                         = return $ Bool False
--- quoted forms. Note that we don't evaluate the symbol
+-- quoted forms
 eval _        _            (List [Atom "quoted", val])                       = return val
--- if clause
+-- conditionals
+eval envIORef funcEnvIORef (List (Atom "case":forms))                        = caseFunc envIORef funcEnvIORef forms
 eval envIORef funcEnvIORef (List [Atom "if", predicate, thenForm, elseForm]) = (eval envIORef funcEnvIORef predicate) >>= \x ->
                                                                                 case x of
                                                                                     Bool True -> eval envIORef funcEnvIORef thenForm
@@ -49,68 +50,12 @@ eval envIORef funcEnvIORef (List (func:args))                                = d
                                                                                 where getFunc :: LispVal -> ThrowsErrorIO LispVal
                                                                                       getFunc (Atom x) = getVar funcEnvIORef x -- lookup symbols in the func namespace
                                                                                       getFunc x = eval envIORef funcEnvIORef x
+eval _        _            x                                                 = throwError (Default (show x))
 
 --------------------------------------
--- Setq evaluation
+-- Functions
 --------------------------------------
-evalSetq :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
-evalSetq envIORef funcEnvIORef l | length l /= 2 = throwError (NumArgsMismatch "2" l)
-                                 | otherwise = case l of
-                                     [Atom varName, value] -> setOrCreateVar envIORef varName =<< eval envIORef funcEnvIORef value
-                                     x -> throwError (TypeMismatch "Atom" (head x))
-
---------------------------------------
--- Function evaluation
---------------------------------------
-makeLambdaFunc :: [LispVal] -> EnvIORef -> EnvIORef -> ThrowsErrorIO LispVal
-makeLambdaFunc (List funcParams:funcBody) envIORef funcEnvIORef = do
-    closure <- copyEnv envIORef -- a lambda carries its own lexical environment. Param mappings are added to the variable closure.
-    funcClosure <- copyEnv funcEnvIORef -- The function closure is copied undisturbed. It is copied though, so if you define any new functions
-                                        -- in this lambda's body, they won't disturb the global function namespace when they are finally eval'ed
-                                        -- in evalFunc
-    optParams <- createOptionalParamList closure
-    restParam <- createRestParam closure
-    return $ Func createReqParamList optParams restParam funcBody closure funcClosure
-    where
-          notRestAtom :: LispVal -> Bool
-          notRestAtom (Atom "&rest") = False
-          notRestAtom _ = True
-
-          -- note that the &optional lambda-list parameter is only used when defining a function (as in the lambda here
-          -- or in a defun). When you call the function, you do NOT provide an &optional atom but simply provide the
-          -- associated value instead.
-          notOptionalAtom :: LispVal -> Bool
-          notOptionalAtom (Atom "&optional") = False
-          notOptionalAtom _ = True
-
-          createReqParamList :: [String]
-          createReqParamList = map show $ takeWhile (\x -> ((&&) (notOptionalAtom x) (notRestAtom x))) funcParams
-
-          createOptionalParamList :: EnvIORef -> ThrowsErrorIO (Maybe [String])
-          createOptionalParamList closure = if null optParams then return Nothing
-                                            else if length optParams == 1 then throwError (NumArgsMismatch ">= 1" optParams)
-                                            else liftM Just $ mapM bindOptParamDefaultValues $ tail optParams
-                                            where
-                                                optParams = takeWhile (notRestAtom) $ dropWhile (notOptionalAtom) funcParams
-
-                                                bindOptParamDefaultValues :: LispVal -> ThrowsErrorIO String
-                                                bindOptParamDefaultValues (Atom x) = bindMultipleVars closure [(x, Bool False)] >> return x -- bind varName to NIL by default
-                                                bindOptParamDefaultValues (List [Atom x]) = bindMultipleVars closure [(x, Bool False)] >> return x -- bind varName to NIL by default
-                                                bindOptParamDefaultValues (List [Atom x, val]) = bindMultipleVars closure [(x, val)] >> return x -- don't evaluate val, just bind varName to it
-                                                bindOptParamDefaultValues (List [Atom x, val, Atom sVar]) = bindMultipleVars closure [(x, List [val, Atom sVar])] >> return x -- supplied p-param bound to NIL by default
-                                                bindOptParamDefaultValues x = throwError (NumArgsMismatch "<= 3" [x])
-
-          createRestParam :: EnvIORef -> ThrowsErrorIO (Maybe String)
-          createRestParam closure = if null restParam then return Nothing
-                                    else if length restParam /= 2 then throwError (NumArgsMismatch "2" restParam) -- only one specifier allowed for &rest
-                                    else case restParam !! 1 of -- &rest can only be followed by a symbol (atom)
-                                        (Atom x) -> bindMultipleVars closure [(x, Bool False)] >> (return . Just) x -- bind varName to NIL by default
-                                        x -> throwError (TypeMismatch "Atom" x)
-                                    where
-                                        restParam = dropWhile notRestAtom funcParams
-makeLambdaFunc (x:_) _ _ = throwError (TypeMismatch "List" x)
-makeLambdaFunc x     _ _ = throwError (NumArgsMismatch "2" x)
-
+-- evaluate functions
 -- Note: args passed in should be already evaluated
 evalFunc :: LispVal -> [LispVal] -> ThrowsErrorIO LispVal
 evalFunc (PrimitiveFunc func)                                               args = liftThrowsError $ func args
@@ -170,18 +115,114 @@ evalFunc (Func reqParams optParams restParam funcBody closure funcEnvIORef) args
 
 evalFunc x _ = throwError (TypeMismatch "Function" x)
 
+-- case
+caseFunc :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
+caseFunc = undefined
+
+-- setq
+evalSetq :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
+evalSetq envIORef funcEnvIORef l | length l /= 2 = throwError (NumArgsMismatch "2" l)
+                                 | otherwise = case l of
+                                     [Atom varName, value] -> setOrCreateVar envIORef varName =<< eval envIORef funcEnvIORef value
+                                     x -> throwError (TypeMismatch "Atom" (head x))
+
+-- apply
+apply :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
+apply _ _ [] = throwError (NumArgsMismatch ">= 1" [])
+apply envIORef funcEnvIORef (functionDesignator:spreadableListDesignator) = (liftM (:) processFunctionDesignator) <*> processSpreadableListDesignator >>=
+                                                                            return . List >>=
+                                                                            eval envIORef funcEnvIORef
+    where processFunctionDesignator :: ThrowsErrorIO LispVal
+          processFunctionDesignator = eval envIORef funcEnvIORef functionDesignator
+
+          processSpreadableListDesignator :: ThrowsErrorIO [LispVal]
+          processSpreadableListDesignator = mapM (eval envIORef funcEnvIORef) spreadableListDesignator >>= expandSpreadableListDesignator >>= mapM f
+
+                                                where
+                                                    -- if the last element of the spreadable argument list is a list, extract and append those values
+                                                    -- if the last element of the spreadable argument list is a dotted list, extract and append its car
+                                                    -- if the last element of the spreadable argument list is anything else, ignore it
+                                                    expandSpreadableListDesignator :: [LispVal] -> ThrowsErrorIO [LispVal]
+                                                    expandSpreadableListDesignator list =
+                                                        if null list then return []
+                                                        else case last list of
+                                                                    (List y) -> return $ (init list) ++ y
+                                                                    (DottedList y _) -> return $ (init list) ++ y
+                                                                    _ -> return (init list)
+                                                    f :: LispVal -> ThrowsErrorIO LispVal
+                                                    f x = return $ List [Atom "quoted",x]
+
+-- lambda
+makeLambdaFunc :: [LispVal] -> EnvIORef -> EnvIORef -> ThrowsErrorIO LispVal
+makeLambdaFunc (List funcParams:funcBody) envIORef funcEnvIORef = do
+    closure <- copyEnv envIORef -- a lambda carries its own lexical environment. Param mappings are added to the variable closure.
+    funcClosure <- copyEnv funcEnvIORef -- The function closure is copied undisturbed. It is copied though, so if you define any new functions
+                                        -- in this lambda's body, they won't disturb the global function namespace when they are finally eval'ed
+                                        -- in evalFunc
+    optParams <- createOptionalParamList closure
+    restParam <- createRestParam closure
+    return $ Func createReqParamList optParams restParam funcBody closure funcClosure
+    where
+          notRestAtom :: LispVal -> Bool
+          notRestAtom (Atom "&rest") = False
+          notRestAtom _ = True
+
+          -- note that the &optional lambda-list parameter is only used when defining a function (as in the lambda here
+          -- or in a defun). When you call the function, you do NOT provide an &optional atom but simply provide the
+          -- associated value instead.
+          notOptionalAtom :: LispVal -> Bool
+          notOptionalAtom (Atom "&optional") = False
+          notOptionalAtom _ = True
+
+          createReqParamList :: [String]
+          createReqParamList = map show $ takeWhile (\x -> ((&&) (notOptionalAtom x) (notRestAtom x))) funcParams
+
+          createOptionalParamList :: EnvIORef -> ThrowsErrorIO (Maybe [String])
+          createOptionalParamList closure = if null optParams then return Nothing
+                                            else if length optParams == 1 then throwError (NumArgsMismatch ">= 1" optParams)
+                                            else liftM Just $ mapM bindOptParamDefaultValues $ tail optParams
+                                            where
+                                                optParams = takeWhile (notRestAtom) $ dropWhile (notOptionalAtom) funcParams
+
+                                                bindOptParamDefaultValues :: LispVal -> ThrowsErrorIO String
+                                                bindOptParamDefaultValues (Atom x) = bindMultipleVars closure [(x, Bool False)] >> return x -- bind varName to NIL by default
+                                                bindOptParamDefaultValues (List [Atom x]) = bindMultipleVars closure [(x, Bool False)] >> return x -- bind varName to NIL by default
+                                                bindOptParamDefaultValues (List [Atom x, val]) = bindMultipleVars closure [(x, val)] >> return x -- don't evaluate val, just bind varName to it
+                                                bindOptParamDefaultValues (List [Atom x, val, Atom sVar]) = bindMultipleVars closure [(x, List [val, Atom sVar])] >> return x -- supplied p-param bound to NIL by default
+                                                bindOptParamDefaultValues x = throwError (NumArgsMismatch "<= 3" [x])
+
+          createRestParam :: EnvIORef -> ThrowsErrorIO (Maybe String)
+          createRestParam closure = if null restParam then return Nothing
+                                    else if length restParam /= 2 then throwError (NumArgsMismatch "2" restParam) -- only one specifier allowed for &rest
+                                    else case restParam !! 1 of -- &rest can only be followed by a symbol (atom)
+                                        (Atom x) -> bindMultipleVars closure [(x, Bool False)] >> (return . Just) x -- bind varName to NIL by default
+                                        x -> throwError (TypeMismatch "Atom" x)
+                                    where
+                                        restParam = dropWhile notRestAtom funcParams
+makeLambdaFunc (x:_) _ _ = throwError (TypeMismatch "List" x)
+makeLambdaFunc x     _ _ = throwError (NumArgsMismatch "2" x)
+
+-- defun
 defun :: [LispVal] -> EnvIORef -> EnvIORef -> ThrowsErrorIO LispVal
 defun (Atom funcName:paramsAndBody) envIORef funcEnvIORef = makeLambdaFunc paramsAndBody envIORef funcEnvIORef >>= -- the function name is bound in the function namespace and not the variable namespace!
                                                             setOrCreateVar funcEnvIORef funcName
 defun x _ _ = throwError (NumArgsMismatch "2" x)
 
--- loads file. this has an effect on the environment (unlike read)
--- if file is not found and
---   a. :if-does-not-exist is nil: nil is returned
---   b. else, an error is shown
+-- load
+--   loads file. this has an effect on the environment (unlike read)
+--   if file is not found and
+--     a. :if-does-not-exist is nil: nil is returned
+--     b. else, an error is shown
 loadFile :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
 loadFile _        _            []                                                       = throwError (NumArgsMismatch "1" [])
-loadFile envIORef funcEnvIORef x@[String _]                                             = (open x) >>= readFileStream >>= liftThrowsError . parseListOfExpr >>= mapM (eval envIORef funcEnvIORef) >>= return . last -- return last form
+loadFile envIORef funcEnvIORef x@[String _]                                             = (open x) >>= readFileStream >>=
+                                                                                          liftThrowsError . parseListOfExpr >>=
+                                                                                          mapM (eval envIORef funcEnvIORef) >>=
+                                                                                          return . last -- return last form
+                                                                                          where
+                                                                                              readFileStream :: LispVal -> ThrowsErrorIO String
+                                                                                              readFileStream (FileStream h) = liftIO $ hGetContents h
+                                                                                              readFileStream y = throwError (TypeMismatch "FileStream" y)
 loadFile envIORef funcEnvIORef [x@(String _), Keyword ":if-does-not-exist", Bool False] = (loadInputFileStream envIORef funcEnvIORef (Bool False) x)
 loadFile envIORef funcEnvIORef [x@(String _), Keyword ":if-does-not-exist", _]          = (loadInputFileStream envIORef funcEnvIORef (Bool True) x)
 loadFile _        _            x@[String _, Keyword ":if-does-not-exist"]               = throwError (NumArgsMismatch "3" x)
@@ -203,12 +244,7 @@ exceptionHandlerForLoad envIORef funcEnvIORef (Bool ifDoesNotExistVal) x = case 
                                                                                        return . last -- return last form
 exceptionHandlerForLoad _ _ x _ = throwError (TypeMismatch "Bool" x)
 
-readFileStream :: LispVal -> ThrowsErrorIO String
-readFileStream (FileStream h) = liftIO $ hGetContents h
-readFileStream y              = throwError (TypeMismatch "FileStream" y)
-
--- primitive functions
--- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- primitives
 primitives :: [(String, ([LispVal] -> ThrowsError LispVal))]
 primitives = [
                 -- numeric operations
@@ -256,8 +292,7 @@ primitives = [
                 ("weak_equal", weak_equal)                                        -- NOT a common lisp function. equivalence ignoring types. exactly two args
              ]
 
--- Primitive Numeric operations
--- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- primitives - numeric ops
 numericOp0OrMoreArgs :: Integer -> (Integer -> Integer -> Integer) -> [LispVal] -> ThrowsError LispVal
 numericOp0OrMoreArgs start optParams l = return . Number =<< (liftM (foldl optParams start) (mapM extractNumber l))
 
@@ -275,9 +310,7 @@ numericOpNArgs :: Int -> (Integer -> Integer -> Integer) -> [LispVal] -> ThrowsE
 numericOpNArgs n optParams l | length l /= n = throwError (NumArgsMismatch ("= " ++ show n) l)
                       | otherwise     = return . Number =<< (\x -> return $ foldl optParams (head x) (tail x)) =<< (mapM extractNumber l)
 
--- Primitive ops that return a boolean result
--- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
+-- primitives - ops that return a boolean result
 -- generic boolean function that we use to build string or numeric specific function
 genericBoolOpNArgs :: (LispVal -> ThrowsError a) -> Int -> (a -> a -> Bool) -> [LispVal] -> ThrowsError LispVal
 genericBoolOpNArgs _ n _ l | length l /= n = throwError (NumArgsMismatch ("= " ++ show n) l)
@@ -321,8 +354,7 @@ booleanAndOp l = return $ foldl f (Bool True) l
           f (Bool False) _ = Bool False
           f _ y = y
 
--- Primitive list ops
--- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- primitives - list ops
 car :: [LispVal] -> ThrowsError LispVal
 car [List []] = return $ Bool False
 car [List [x]] = return x
@@ -345,8 +377,7 @@ cons [z,(DottedList x y)] = return $ DottedList (z:x) y -- the second one's car 
 cons [x, y] = return $ DottedList [x] y                 -- non-list cdr's always make dotted lists
 cons x = throwError $ NumArgsMismatch "= 2" x
 
--- Primitive Equivalence ops
--- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- primitives - equivalence ops
 eql :: [LispVal] -> ThrowsError LispVal
 eql [(Atom x), (Atom y)] = return $ Bool ((==) x y)
 eql [(Number x), (Number y)] = return $ Bool ((==) x y)
@@ -364,7 +395,6 @@ toBool _ = False
 zipIntoList :: [LispVal] -> [LispVal] -> [[LispVal]]
 zipIntoList = zipWith (\a funcBody -> a:[funcBody])
 
--- use applicative <*>
 weak_equal:: [LispVal] -> ThrowsError LispVal
 weak_equal [(List x), (List y)] | length x /= length y = return $ Bool False
                                 | otherwise = return . Bool =<< liftM (all toBool) (mapM weak_equal (zipIntoList x y))
@@ -383,40 +413,15 @@ weak_equal m@[x, y] = return . Bool . any id  =<< (liftM (:) eqlResult) <*> mapM
                             primitiveEqualityFunctions = [Extractor extractBool, Extractor extractString, Extractor extractNumber]
 weak_equal _ = return $ Bool False
 
--- atom == not cons
+-- atom
+--   atom == not cons
 atom :: [LispVal] -> ThrowsError LispVal
 atom [List _] = return $ Bool False
 atom [DottedList _ _] = return $ Bool False
 atom [_] = return $ Bool True
 atom x = throwError (NumArgsMismatch "1" x)
 
-apply :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
-apply _ _ [] = throwError (NumArgsMismatch ">= 1" [])
-apply envIORef funcEnvIORef (functionDesignator:spreadableListDesignator) = (liftM (:) processFunctionDesignator) <*> processSpreadableListDesignator >>=
-                                                                            return . List >>=
-                                                                            eval envIORef funcEnvIORef
-    where processFunctionDesignator :: ThrowsErrorIO LispVal
-          processFunctionDesignator = eval envIORef funcEnvIORef functionDesignator
-
-          processSpreadableListDesignator :: ThrowsErrorIO [LispVal]
-          processSpreadableListDesignator = mapM (eval envIORef funcEnvIORef) spreadableListDesignator >>= expandSpreadableListDesignator >>= mapM f
-
-                                                where
-                                                    -- if the last element of the spreadable argument list is a list, extract and append those values
-                                                    -- if the last element of the spreadable argument list is a dotted list, extract and append its car
-                                                    -- if the last element of the spreadable argument list is anything else, ignore it
-                                                    expandSpreadableListDesignator :: [LispVal] -> ThrowsErrorIO [LispVal]
-                                                    expandSpreadableListDesignator list =
-                                                        if null list then return []
-                                                        else case last list of
-                                                                    (List y) -> return $ (init list) ++ y
-                                                                    (DottedList y _) -> return $ (init list) ++ y
-                                                                    _ -> return (init list)
-                                                    f :: LispVal -> ThrowsErrorIO LispVal
-                                                    f x = return $ List [Atom "quoted",x]
-
--- IO primitive functions
--- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- primitives - io functions
 ioPrimitives :: [(String, ([LispVal] -> ThrowsErrorIO LispVal))]
 ioPrimitives = [
                 ("open",            open),
@@ -424,7 +429,8 @@ ioPrimitives = [
                 ("read",            read)
                ]
 
--- only supports :direction :input, :direction :output and :direction :io at the moment
+-- open
+--   only supports :direction :input, :direction :output and :direction :io at the moment
 open :: [LispVal] -> ThrowsErrorIO LispVal
 open [] = throwError (NumArgsMismatch ">= 1" [])
 open [x@(String _)] = createInputFileStream x
@@ -468,19 +474,22 @@ openfile filePath ioMode = liftIO $ catch
                                                             else -- isPermissionError
                                                                 return (Left $ "no permission to open file " ++ filePath))
 
--- in this implementation, closing an already closed stream is not an error
+-- close
+--   in this implementation, closing an already closed stream is not an error
 close :: [LispVal] -> ThrowsErrorIO LispVal
 close [] = throwError (NumArgsMismatch "1" [])
 close [FileStream x] = liftIO $ hClose x >> return (Bool True)
 close x = throwError (TypeMismatch "FileStream" (head x))
 
--- read is given a stream. it reads from the stream and creates an object that that data represents
--- it does nothing to the environment
+-- read
+--   read is given a stream. it reads from the stream and creates an object that that data represents
+--   it does nothing to the environment
 read :: [LispVal] -> ThrowsErrorIO LispVal
 read [] = read [FileStream stdin]
 read [FileStream x] = (liftIO $ hGetLine x) >>= liftThrowsError . parseSingleExpr
 read x = throwError (TypeMismatch "FileStream or []" (head x))
 
+-- prin1
 prin1 :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
 prin1 _ _ [obj] = liftIO $ hPutStr stdout (show obj) >> return obj
 prin1 envIORef funcEnvIORef [obj, filestream] = (eval envIORef funcEnvIORef filestream) >>= prin1'
@@ -492,7 +501,8 @@ prin1 envIORef funcEnvIORef [obj, filestream] = (eval envIORef funcEnvIORef file
                                               prin1' z = throwError (TypeMismatch "FileStream" z)
 prin1 _ _ _ = throwError (Default "incorrect parameters for prin1")
 
--- same as prin1 except prints a newline at the beginning and a space at the end
+-- print
+--   same as prin1 except prints a newline at the beginning and a space at the end
 printFunc :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
 printFunc _ _ [obj] = liftIO $ hPutStr stdout ("\n" ++ (show obj) ++ " ") >> return obj
 printFunc envIORef funcEnvIORef [obj, filestream] = (eval envIORef funcEnvIORef filestream) >>= printFunc'
