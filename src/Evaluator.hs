@@ -13,7 +13,7 @@ import System.IO.Error (isAlreadyInUseError, isDoesNotExistError)
 import Parser
 import Prelude hiding (read)
 
--- TODO: add eval, with-open-file, funcall, cond, case, append, backquoted list
+-- TODO: add eval, with-open-file, funcall, cond, append, backquoted list
 
 eval :: EnvIORef -> EnvIORef -> LispVal -> ThrowsErrorIO LispVal
 -- primitives
@@ -51,6 +51,16 @@ eval envIORef funcEnvIORef (List (func:args))                                = d
                                                                                       getFunc (Atom x) = getVar funcEnvIORef x -- lookup symbols in the func namespace
                                                                                       getFunc x = eval envIORef funcEnvIORef x
 eval _        _            x                                                 = throwError (Default (show x))
+
+
+evalFormsAndReturnLast :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
+evalFormsAndReturnLast envIORef funcEnvIORef forms = evalForms envIORef funcEnvIORef forms >>= returnLast
+
+evalForms :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO [LispVal]
+evalForms envIORef funcEnvIORef = mapM (eval envIORef funcEnvIORef)
+
+returnLast :: [LispVal] -> ThrowsErrorIO LispVal
+returnLast = return . last
 
 --------------------------------------
 -- Functions
@@ -115,46 +125,37 @@ evalFunc (Func reqParams optParams restParam funcBody closure funcEnvIORef) args
 
 evalFunc x _ = throwError (TypeMismatch "Function" x)
 
-evalFormsAndReturnLast :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
-evalFormsAndReturnLast envIORef funcEnvIORef forms = evalForms envIORef funcEnvIORef forms >>= returnLast
-
-evalForms :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO [LispVal]
-evalForms envIORef funcEnvIORef = mapM (eval envIORef funcEnvIORef)
-
-returnLast :: [LispVal] -> ThrowsErrorIO LispVal
-returnLast = return . last
-
 -- case
 caseFunc :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
 caseFunc _ _ [] = throwError (NumArgsMismatch "1" [])
-caseFunc envIORef funcEnvIORef (keyForm@(List _):clauses) = eval envIORef funcEnvIORef keyForm >>= chooseCase clauses
-                                                            where
-                                                              chooseCase :: [LispVal] -> LispVal -> ThrowsErrorIO LispVal
-                                                              chooseCase [] _ = return $ Bool False
-                                                              chooseCase [List (Atom "otherwise":forms)] _ =
-                                                                evalFormsAndReturnLast envIORef funcEnvIORef forms
-                                                              chooseCase [List (List keys:forms)] testKey =
-                                                                liftThrowsError (checkIfInList testKey keys) >>= \matchFound ->
-                                                                    if matchFound then evalFormsAndReturnLast envIORef funcEnvIORef forms
-                                                                    else chooseCase [] testKey
-                                                              chooseCase [List (key:forms)] testKey =
-                                                                chooseCase [List (List [key]:forms)] testKey
-                                                              chooseCase (List (List keys:forms):remainingClauses) testKey =
-                                                                liftThrowsError (checkIfInList testKey keys) >>= \matchFound ->
-                                                                    if matchFound then evalFormsAndReturnLast envIORef funcEnvIORef forms
-                                                                    else chooseCase remainingClauses testKey
-                                                              chooseCase (List (key:forms):remainingClauses) testKey =
-                                                                chooseCase (List (List [key]:forms):remainingClauses) testKey
-                                                              chooseCase x _ = throwError (TypeMismatch "List" (head x))
+caseFunc envIORef funcEnvIORef (keyForm:clauses) = eval envIORef funcEnvIORef keyForm >>=
+                                                   chooseCase clauses
+                                                    where
+                                                        chooseCase :: [LispVal] -> LispVal -> ThrowsErrorIO LispVal
+                                                        chooseCase [] _ = return $ Bool False
+                                                        chooseCase [List (Atom "otherwise":forms)] _ =
+                                                          evalFormsAndReturnLast envIORef funcEnvIORef forms
+                                                        chooseCase [List (List keys:forms)] testKey =
+                                                          liftThrowsError (checkIfInList testKey keys) >>= \matchFound ->
+                                                              if matchFound then evalFormsAndReturnLast envIORef funcEnvIORef forms
+                                                              else chooseCase [] testKey
+                                                        chooseCase [List (key:forms)] testKey =
+                                                          chooseCase [List (List [key]:forms)] testKey
+                                                        chooseCase (List (List keys:forms):remainingClauses) testKey =
+                                                          liftThrowsError (checkIfInList testKey keys) >>= \matchFound ->
+                                                              if matchFound then evalFormsAndReturnLast envIORef funcEnvIORef forms
+                                                              else chooseCase remainingClauses testKey
+                                                        chooseCase (List (key:forms):remainingClauses) testKey =
+                                                          chooseCase (List (List [key]:forms):remainingClauses) testKey
+                                                        chooseCase x _ = throwError (TypeMismatch "List" (head x))
 
-                                                              checkIfInList :: LispVal -> [LispVal] -> ThrowsError Bool
-                                                              checkIfInList _ [] = return False
-                                                              checkIfInList testKey (key:keys) =
-                                                                eql [key, testKey] >>= \eq ->
-                                                                    case eq of
-                                                                        Bool False -> checkIfInList testKey keys
-                                                                        _ -> return True
-caseFunc _ _ x = throwError (TypeMismatch "List" (head x))
+                                                        checkIfInList :: LispVal -> [LispVal] -> ThrowsError Bool
+                                                        checkIfInList _ [] = return False
+                                                        checkIfInList testKey (key:keys) =
+                                                          eql [key, testKey] >>= \eq ->
+                                                              case eq of
+                                                                  Bool False -> checkIfInList testKey keys
+                                                                  _ -> return True
 
 -- setq
 evalSetq :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
