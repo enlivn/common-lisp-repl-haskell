@@ -39,11 +39,11 @@ eval envIORef funcEnvIORef (List (Atom "apply":funcParamsAndBody))           = a
 eval envIORef funcEnvIORef (List (Atom "lambda":paramsAndBody))              = makeLambdaFunc paramsAndBody envIORef funcEnvIORef
 eval envIORef funcEnvIORef (List (Atom "defun":nameAndParamsAndBody))        = defun nameAndParamsAndBody envIORef funcEnvIORef
 eval envIORef funcEnvIORef (List (Atom "load":loadArgs))                     = loadFile envIORef funcEnvIORef loadArgs
-eval envIORef funcEnvIORef (List (Atom "prin1":prin1Args))                   = prin1 envIORef funcEnvIORef =<< mapM (eval envIORef funcEnvIORef) prin1Args
-eval envIORef funcEnvIORef (List (Atom "print":printArgs))                   = printFunc envIORef funcEnvIORef =<< mapM (eval envIORef funcEnvIORef) printArgs
+eval envIORef funcEnvIORef (List (Atom "prin1":prin1Args))                   = prin1 envIORef funcEnvIORef =<< evalForms envIORef funcEnvIORef prin1Args
+eval envIORef funcEnvIORef (List (Atom "print":printArgs))                   = printFunc envIORef funcEnvIORef =<< evalForms envIORef funcEnvIORef printArgs
 eval envIORef funcEnvIORef (List (func:args))                                = do
                                                                                 evaledFunc <- getFunc func
-                                                                                evaledArgs <- mapM (eval envIORef funcEnvIORef ) args
+                                                                                evaledArgs <- evalForms envIORef funcEnvIORef args
                                                                                 -- note we don't pass in the environment here because
                                                                                 -- a function carries its own lexical environment
                                                                                 evalFunc evaledFunc evaledArgs
@@ -111,13 +111,50 @@ evalFunc (Func reqParams optParams restParam funcBody closure funcEnvIORef) args
         -- return NIL if the body is empty, else return the result of the last form
         evalFuncBodyInClosure :: ThrowsErrorIO LispVal
         evalFuncBodyInClosure | null funcBody = return $ Bool False
-                              | otherwise = mapM (eval closure funcEnvIORef) funcBody >>= return . last
+                              | otherwise = evalFormsAndReturnLast closure funcEnvIORef funcBody
 
 evalFunc x _ = throwError (TypeMismatch "Function" x)
 
+evalFormsAndReturnLast :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
+evalFormsAndReturnLast envIORef funcEnvIORef forms = evalForms envIORef funcEnvIORef forms >>= returnLast
+
+evalForms :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO [LispVal]
+evalForms envIORef funcEnvIORef forms = mapM (eval envIORef funcEnvIORef) forms
+
+returnLast :: [LispVal] -> ThrowsErrorIO LispVal
+returnLast = return . last
+
 -- case
 caseFunc :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
-caseFunc = undefined
+caseFunc _ _ [] = throwError (NumArgsMismatch "1" [])
+caseFunc envIORef funcEnvIORef (keyForm@(List _):clauses) = eval envIORef funcEnvIORef keyForm >>= chooseCase clauses
+                                                            where
+                                                              chooseCase :: [LispVal] -> LispVal -> ThrowsErrorIO LispVal
+                                                              chooseCase [] _ = return $ Bool False
+                                                              chooseCase [List (Atom "otherwise":forms)] _ =
+                                                                evalFormsAndReturnLast envIORef funcEnvIORef forms
+                                                              chooseCase [List (List keys:forms)] testKey =
+                                                                (liftThrowsError $ checkIfInList testKey keys) >>= \matchFound ->
+                                                                    if matchFound then evalFormsAndReturnLast envIORef funcEnvIORef forms
+                                                                    else chooseCase [] testKey
+                                                              chooseCase [List (key:forms)] testKey =
+                                                                chooseCase [List (List [key]:forms)] testKey
+                                                              chooseCase (List (List keys:forms):remainingClauses) testKey =
+                                                                (liftThrowsError $ checkIfInList testKey keys) >>= \matchFound ->
+                                                                    if matchFound then evalFormsAndReturnLast envIORef funcEnvIORef forms
+                                                                    else chooseCase remainingClauses testKey
+                                                              chooseCase (List (key:forms):remainingClauses) testKey =
+                                                                chooseCase (List (List [key]:forms):remainingClauses) testKey
+                                                              chooseCase x _ = throwError (TypeMismatch "List" (head x))
+
+                                                              checkIfInList :: LispVal -> [LispVal] -> ThrowsError Bool
+                                                              checkIfInList _ [] = return False
+                                                              checkIfInList testKey (key:keys) =
+                                                                eql [key, testKey] >>= \eq ->
+                                                                    case eq of
+                                                                        Bool False -> checkIfInList testKey keys
+                                                                        _ -> return True
+caseFunc _ _ x = throwError (TypeMismatch "List" (head x))
 
 -- setq
 evalSetq :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
@@ -136,7 +173,7 @@ apply envIORef funcEnvIORef (functionDesignator:spreadableListDesignator) = (lif
           processFunctionDesignator = eval envIORef funcEnvIORef functionDesignator
 
           processSpreadableListDesignator :: ThrowsErrorIO [LispVal]
-          processSpreadableListDesignator = mapM (eval envIORef funcEnvIORef) spreadableListDesignator >>= expandSpreadableListDesignator >>= mapM makeQuoted
+          processSpreadableListDesignator = evalForms envIORef funcEnvIORef spreadableListDesignator >>= expandSpreadableListDesignator >>= mapM makeQuoted
 
                                                 where
                                                     -- if the last element of the spreadable argument list is a list, extract and append those values
@@ -220,8 +257,7 @@ loadFile :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
 loadFile _        _            []                                                       = throwError (NumArgsMismatch "1" [])
 loadFile envIORef funcEnvIORef x@[String _]                                             = (open x) >>= readFileStream >>=
                                                                                           liftThrowsError . parseListOfExpr >>=
-                                                                                          mapM (eval envIORef funcEnvIORef) >>=
-                                                                                          return . last -- return last form
+                                                                                          evalFormsAndReturnLast envIORef funcEnvIORef
                                                                                           where
                                                                                               readFileStream :: LispVal -> ThrowsErrorIO String
                                                                                               readFileStream (FileStream h) = liftIO $ hGetContents h
@@ -243,8 +279,7 @@ exceptionHandlerForLoad envIORef funcEnvIORef (Bool ifDoesNotExistVal) x = case 
                                                                                         else return (Bool False)
                                                                             Right h -> (liftIO $ hGetContents h) >>=
                                                                                        liftThrowsError . parseListOfExpr >>=
-                                                                                       mapM (eval envIORef funcEnvIORef) >>=
-                                                                                       return . last -- return last form
+                                                                                       evalFormsAndReturnLast envIORef funcEnvIORef
 exceptionHandlerForLoad _ _ x _ = throwError (TypeMismatch "Bool" x)
 
 -- primitives
