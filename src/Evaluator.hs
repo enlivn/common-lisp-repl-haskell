@@ -60,7 +60,8 @@ evalForms :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO [LispVal]
 evalForms envIORef funcEnvIORef = mapM (eval envIORef funcEnvIORef)
 
 returnLast :: [LispVal] -> ThrowsErrorIO LispVal
-returnLast = return . last
+returnLast x | null x = return (Bool False)
+             | otherwise = (return . last) x
 
 --------------------------------------
 -- Functions
@@ -156,6 +157,7 @@ caseFunc envIORef funcEnvIORef (keyForm:clauses) = eval envIORef funcEnvIORef ke
                                                               case eq of
                                                                   Bool False -> checkIfInList testKey keys
                                                                   _ -> return True
+
 
 -- setq
 evalSetq :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
