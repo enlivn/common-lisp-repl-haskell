@@ -13,7 +13,7 @@ import System.IO.Error (isAlreadyInUseError, isDoesNotExistError)
 import Parser
 import Prelude hiding (read)
 
--- TODO: add eval, with-open-file, funcall, append, backquoted list
+-- TODO: add eval, with-open-file, funcall, write-string, function, backquoted list
 
 eval :: EnvIORef -> EnvIORef -> LispVal -> ThrowsErrorIO LispVal
 -- primitives
@@ -40,8 +40,9 @@ eval envIORef funcEnvIORef (List (Atom "apply":funcParamsAndBody))           = a
 eval envIORef funcEnvIORef (List (Atom "lambda":paramsAndBody))              = makeLambdaFunc paramsAndBody envIORef funcEnvIORef
 eval envIORef funcEnvIORef (List (Atom "defun":nameAndParamsAndBody))        = defun nameAndParamsAndBody envIORef funcEnvIORef
 eval envIORef funcEnvIORef (List (Atom "load":loadArgs))                     = loadFile envIORef funcEnvIORef loadArgs
-eval envIORef funcEnvIORef (List (Atom "prin1":prin1Args))                   = prin1 envIORef funcEnvIORef =<< evalForms envIORef funcEnvIORef prin1Args
-eval envIORef funcEnvIORef (List (Atom "print":printArgs))                   = printFunc envIORef funcEnvIORef =<< evalForms envIORef funcEnvIORef printArgs
+eval envIORef funcEnvIORef (List (Atom "prin1":prin1Args))                   = prin1 =<< evalForms envIORef funcEnvIORef prin1Args
+eval envIORef funcEnvIORef (List (Atom "print":printArgs))                   = printFunc =<< evalForms envIORef funcEnvIORef printArgs
+eval envIORef funcEnvIORef (List (Atom "write-string":printArgs))            = writeString =<< evalForms envIORef funcEnvIORef printArgs
 eval envIORef funcEnvIORef (List (func:args))                                = do
                                                                                 evaledFunc <- getFunc func
                                                                                 evaledArgs <- evalForms envIORef funcEnvIORef args
@@ -306,6 +307,40 @@ exceptionHandlerForLoad envIORef funcEnvIORef (Bool ifDoesNotExistVal) x = case 
                                                                                        evalFormsAndReturnLast envIORef funcEnvIORef
 exceptionHandlerForLoad _ _ x _ = throwError (TypeMismatch "Bool" x)
 
+-- prin1
+prin1 :: [LispVal] -> ThrowsErrorIO LispVal
+prin1 [obj] = liftIO $ putStr (show obj) >> return obj
+prin1 [obj, filestream] = writeStringToFile (show obj) filestream >> return obj
+prin1 _ = throwError (Default "incorrect parameters for prin1")
+
+-- print
+--   same as prin1 except prints a newline at the beginning and a space at the end
+printFunc :: [LispVal] -> ThrowsErrorIO LispVal
+printFunc [obj] = liftIO $ putStr ("\n" ++ show obj ++ " ") >> return obj
+printFunc [obj, filestream] = writeStringToFile ("\n" ++ show obj ++ " ") filestream >> return obj
+printFunc _ = throwError (Default "incorrect parameters for print")
+
+-- write-string
+writeString :: [LispVal] -> ThrowsErrorIO LispVal
+writeString [val@(String x)] = liftIO $ putStr x >> return val
+writeString [val@(String x), filestream] = writeStringToFile x filestream >> return val
+writeString _ = throwError (Default "incorrect parameters for writeString")
+
+writeStringToFile :: String -> LispVal -> ThrowsErrorIO ()
+writeStringToFile x (FileStream h) = do
+                                isFileWritable <- checkIfWritable
+                                case isFileWritable of
+                                    Right True -> liftIO $ hPutStr h x
+                                    Right False -> throwError (Default "not an output stream")
+                                    Left err -> throwError (Default err)
+
+                                where
+                                    checkIfWritable :: ThrowsErrorIO (Either String Bool)
+                                    checkIfWritable = liftIO $ catch
+                                                              (liftM Right $ hIsWritable h)
+                                                              (\(_ :: IOException) -> return . Left $ show h ++ " is closed")
+writeStringToFile _ z = throwError (TypeMismatch "FileStream" z)
+
 -- primitives
 primitives :: [(String, [LispVal] -> ThrowsError LispVal)]
 primitives = [
@@ -551,31 +586,6 @@ read :: [LispVal] -> ThrowsErrorIO LispVal
 read [] = read [FileStream stdin]
 read [FileStream x] = liftIO (hGetLine x) >>= liftThrowsError . parseSingleExpr
 read x = throwError (TypeMismatch "FileStream or []" (head x))
-
--- prin1
-prin1 :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
-prin1 _ _ [obj] = liftIO $ putStr (show obj) >> return obj
-prin1 envIORef funcEnvIORef [obj, filestream] = eval envIORef funcEnvIORef filestream >>= prin1'
-                                        where prin1' :: LispVal -> ThrowsErrorIO LispVal
-                                              prin1' (FileStream h) = do
-                                                isFileWritable <- liftIO $ hIsWritable h
-                                                if isFileWritable then liftIO $ hPutStr h (show obj) >> return obj
-                                                else throwError (Default "not an output stream")
-                                              prin1' z = throwError (TypeMismatch "FileStream" z)
-prin1 _ _ _ = throwError (Default "incorrect parameters for prin1")
-
--- print
---   same as prin1 except prints a newline at the beginning and a space at the end
-printFunc :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
-printFunc _ _ [obj] = liftIO $ putStr ("\n" ++ show obj ++ " ") >> return obj
-printFunc envIORef funcEnvIORef [obj, filestream] = eval envIORef funcEnvIORef filestream >>= printFunc'
-                                        where printFunc' :: LispVal -> ThrowsErrorIO LispVal
-                                              printFunc' (FileStream h) = do
-                                                isFileWritable <- liftIO $ hIsWritable h
-                                                if isFileWritable then liftIO $ hPutStr h ("\n" ++ show obj ++ " ") >> return obj
-                                                else throwError (Default "not an output stream")
-                                              printFunc' z = throwError (TypeMismatch "FileStream" z)
-printFunc _ _ _ = throwError (Default "incorrect parameters for print")
 
 --------------------------------------
 -- helper functions
