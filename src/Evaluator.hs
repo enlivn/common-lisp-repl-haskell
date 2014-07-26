@@ -13,7 +13,7 @@ import System.IO.Error (isAlreadyInUseError, isDoesNotExistError)
 import Parser
 import Prelude hiding (read)
 
--- TODO: add eval, with-open-file, funcall, cond, append, backquoted list
+-- TODO: add eval, with-open-file, funcall, append, backquoted list
 
 eval :: EnvIORef -> EnvIORef -> LispVal -> ThrowsErrorIO LispVal
 -- primitives
@@ -28,6 +28,7 @@ eval _        _            (List [])                                         = r
 eval _        _            (List [Atom "quoted", val])                       = return val
 -- conditionals
 eval envIORef funcEnvIORef (List (Atom "case":forms))                        = caseFunc envIORef funcEnvIORef forms
+eval envIORef funcEnvIORef (List (Atom "cond":forms))                        = condFunc envIORef funcEnvIORef forms
 eval envIORef funcEnvIORef (List [Atom "if", predicate, thenForm, elseForm]) = eval envIORef funcEnvIORef predicate >>= \x ->
                                                                                 case x of
                                                                                     Bool True -> eval envIORef funcEnvIORef thenForm
@@ -158,6 +159,27 @@ caseFunc envIORef funcEnvIORef (keyForm:clauses) = eval envIORef funcEnvIORef ke
                                                                   Bool False -> checkIfInList testKey keys
                                                                   _ -> return True
 
+-- cond
+condFunc :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
+condFunc _ _ [] = return $ Bool False
+condFunc envIORef funcEnvIORef (List (testForm:forms):clauses) = eval envIORef funcEnvIORef testForm >>= execFormIfTrue
+                                                                 where
+                                                                    execFormIfTrue :: LispVal -> ThrowsErrorIO LispVal
+                                                                    execFormIfTrue x = do
+                                                                        result <- isTrue x
+                                                                        if result then
+                                                                            if null forms then return x
+                                                                            else evalFormsAndReturnLast envIORef funcEnvIORef forms
+                                                                        else condFunc envIORef funcEnvIORef clauses
+condFunc _ _ x = throwError (TypeMismatch "List" (head x))
+
+isTrue :: LispVal -> ThrowsErrorIO Bool
+isTrue = liftM not . isNil
+
+isNil :: LispVal -> ThrowsErrorIO Bool
+isNil (Bool False) = return True
+isNil (List []) = return True
+isNil _ = return False
 
 -- setq
 evalSetq :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
