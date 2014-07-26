@@ -36,7 +36,7 @@ parseNumber = do
     y <- option '+' (oneOf "+-")
     x <- many1 digit
     case y of
-        '+' -> return $ (Number . read) $ x
+        '+' -> return $ (Number . read) x
         _   -> return $ (Number . read) $ y:x
 
 -- An Atom is a letter or symbol followed by any number of letters, digits,

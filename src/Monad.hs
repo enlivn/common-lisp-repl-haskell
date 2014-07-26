@@ -1,6 +1,7 @@
 module Monad where
 
 import Data.IORef
+import Data.Maybe (isJust)
 import Types
 import Control.Monad.Error
 
@@ -13,10 +14,10 @@ liftThrowsError (Left a) = throwError a
 liftThrowsError (Right a) = return a
 
 runThrowsErrorIO :: ThrowsErrorIO String -> IO String
-runThrowsErrorIO x = runErrorT x >>= (return . extractVal . handleError) -- runErrorT :: ErrorT e m a -> m (Either e a)
+runThrowsErrorIO x = liftM (extractVal . handleError) (runErrorT x) -- runErrorT :: ErrorT e m a -> m (Either e a)
 
 isVarDefined :: EnvIORef -> String -> IO Bool
-isVarDefined envIORef varName = readIORef envIORef >>= (return . (lookup varName)) >>= return . (maybe (False) (const True)) -- readIORef :: IORef a -> IO a
+isVarDefined envIORef varName = liftM (isJust . lookup varName) (readIORef envIORef) -- readIORef :: IORef a -> IO a
 
 -- get value of an existing var
 -- throws UnboundVar error if var does not exist
@@ -51,8 +52,7 @@ copyEnv ::EnvIORef -> ThrowsErrorIO EnvIORef
 copyEnv e = liftIO $ readIORef e >>= newIORef
 
 setExistingVar :: EnvIORef -> String -> LispVal -> IO LispVal
-setExistingVar envIORef varName newValue = do
-    removeExistingBinding >>= \x -> createAndSetNewVar x varName newValue
+setExistingVar envIORef varName newValue = removeExistingBinding >>= \x -> createAndSetNewVar x varName newValue
     where
         removeExistingBinding :: IO EnvIORef
         removeExistingBinding = do
@@ -63,4 +63,4 @@ createAndSetNewVar :: EnvIORef -> String -> LispVal -> IO LispVal
 createAndSetNewVar envIORef varName newValue = do
         env <- liftIO $ readIORef envIORef
         newCreatedValue <- newIORef newValue
-        writeIORef envIORef ([(varName, newCreatedValue)] ++ env) >> readIORef newCreatedValue -- writeIORef :: IORef a -> a -> IO ()
+        writeIORef envIORef ((varName, newCreatedValue) : env) >> readIORef newCreatedValue -- writeIORef :: IORef a -> a -> IO ()

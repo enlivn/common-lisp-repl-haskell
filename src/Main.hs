@@ -6,7 +6,9 @@ import System.IO
 import Evaluator
 import Types
 import Monad
+import Control.Monad
 import Control.Monad.Error
+import Control.Arrow (second)
 import Data.IORef
 
 main :: IO ()
@@ -14,9 +16,9 @@ main = do
   x <- getArgs
   funcEnv <- bindPrimitiveFunctions
   varEnv <- initializeEnv
-  case (length x) of
+  case length x of
     0 -> runRepl varEnv funcEnv --no args = start up REPL
-    1 -> evalAndPrintRawAndPlainExpr varEnv funcEnv (x !! 0) -- single arg = evaluate as an expression
+    1 -> evalAndPrintRawAndPlainExpr varEnv funcEnv (head x) -- single arg = evaluate as an expression
     _ -> putStrLn "Error: Only 0 or 1 arguments allowed."
 
 --------------------------------------
@@ -30,10 +32,10 @@ bindPrimitiveFunctions =  bindMultipleVars' createIOPrimitiveBindingMap =<< bind
             Right env -> return env -- leaving out Left because that signals programmer error
 
         createPrimitiveBindingMap :: [(String, LispVal)]
-        createPrimitiveBindingMap  = map (\(x,y) -> (x, PrimitiveFunc y)) primitives
+        createPrimitiveBindingMap  = map (second PrimitiveFunc) primitives
 
         createIOPrimitiveBindingMap :: [(String, LispVal)]
-        createIOPrimitiveBindingMap  = map (\(x,y) -> (x, IOFunc y)) ioPrimitives
+        createIOPrimitiveBindingMap  = map (second IOFunc) ioPrimitives
 
 initializeEnv :: IO EnvIORef
 initializeEnv = newIORef [] -- newIORef :: a -> IO (IORef a)
@@ -44,11 +46,10 @@ runRepl envIORef funcEnvIORef = loop_ (promptAndReadInput "clisp>> ") (== "quit"
 loop_ :: Monad m => m a -> (a -> Bool) -> (a -> m()) -> m ()
 loop_ promptFunc terminatePredicate action = do
     input <- promptFunc
-    if (terminatePredicate input) then
-      return ()
-    else do
-      action input
-      loop_ promptFunc terminatePredicate action
+    unless (terminatePredicate input) $
+        do
+            action input
+            loop_ promptFunc terminatePredicate action
 
 promptAndReadInput :: String -> IO String
 promptAndReadInput msg = outputStr msg >> getLine
@@ -60,11 +61,11 @@ evalAndPrintExpr :: EnvIORef -> EnvIORef -> String -> IO ()
 evalAndPrintExpr envIORef funcEnvIORef expr = evalExpr envIORef funcEnvIORef expr >>= outputStrLn
 
 evalExpr :: EnvIORef -> EnvIORef -> String -> IO String
-evalExpr envIORef funcEnvIORef str = runThrowsErrorIO $ (liftM show . eval envIORef funcEnvIORef) =<< (liftThrowsError $ parseSingleExpr $ str)
+evalExpr envIORef funcEnvIORef str = runThrowsErrorIO $ (liftM show . eval envIORef funcEnvIORef) =<< liftThrowsError (parseSingleExpr str)
 
 -- used for debugging to see parse result
 evalAndPrintRawExpr :: String -> IO ()
-evalAndPrintRawExpr = (outputStrLn . evalRawExpr)
+evalAndPrintRawExpr = outputStrLn . evalRawExpr
 
 evalRawExpr :: String -> String
 evalRawExpr = parseExprRaw

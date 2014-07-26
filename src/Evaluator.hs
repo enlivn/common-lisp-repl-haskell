@@ -7,7 +7,7 @@ import Data.Char (toLower)
 import Control.Applicative ((<*>))
 import Control.Exception
 import Monad
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, isNothing)
 import System.IO
 import System.IO.Error (isAlreadyInUseError, isDoesNotExistError)
 import Parser
@@ -28,7 +28,7 @@ eval _        _            (List [])                                         = r
 eval _        _            (List [Atom "quoted", val])                       = return val
 -- conditionals
 eval envIORef funcEnvIORef (List (Atom "case":forms))                        = caseFunc envIORef funcEnvIORef forms
-eval envIORef funcEnvIORef (List [Atom "if", predicate, thenForm, elseForm]) = (eval envIORef funcEnvIORef predicate) >>= \x ->
+eval envIORef funcEnvIORef (List [Atom "if", predicate, thenForm, elseForm]) = eval envIORef funcEnvIORef predicate >>= \x ->
                                                                                 case x of
                                                                                     Bool True -> eval envIORef funcEnvIORef thenForm
                                                                                     Bool False -> eval envIORef funcEnvIORef elseForm
@@ -67,7 +67,7 @@ evalFunc (Func reqParams optParams restParam funcBody closure funcEnvIORef) args
     where
         bindReqParamsInClosure :: ThrowsErrorIO EnvIORef
         bindReqParamsInClosure | length reqParams > length args = throwError (NumArgsMismatch (">= " ++ (show . length) reqParams) args)
-                               | length args > length reqParams && (optParams == Nothing) = throwError (NumArgsMismatch ((show . length) reqParams) args)
+                               | length args > length reqParams && isNothing optParams = throwError (NumArgsMismatch ((show . length) reqParams) args)
                                | otherwise = bindMultipleVars closure (zip reqParams args)
 
         listAfterReq :: [LispVal]
@@ -92,13 +92,13 @@ evalFunc (Func reqParams optParams restParam funcBody closure funcEnvIORef) args
                     where g :: String -> ThrowsErrorIO [(String, LispVal)]
                           g varName = getVar closure varName >>= \currentVal ->
                             case currentVal of
-                                (List [defaultVal, (Atom sVar)]) -> return [(sVar, Bool False), (varName, defaultVal)]
+                                (List [defaultVal, Atom sVar]) -> return [(sVar, Bool False), (varName, defaultVal)]
                                 defaultVal                       -> return [(varName,defaultVal)]
 
         listAfterReqAndOpt :: LispVal
-        listAfterReqAndOpt = List $ drop (getLengthoP) listAfterReq
+        listAfterReqAndOpt = List $ drop getLengthoP listAfterReq
             where
-                getLengthoP | optParams == Nothing = 0
+                getLengthoP | isNothing optParams = 0
                             | otherwise = length (fromJust optParams)
 
         bindRestParamInClosure :: ThrowsErrorIO EnvIORef
@@ -119,7 +119,7 @@ evalFormsAndReturnLast :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO Lis
 evalFormsAndReturnLast envIORef funcEnvIORef forms = evalForms envIORef funcEnvIORef forms >>= returnLast
 
 evalForms :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO [LispVal]
-evalForms envIORef funcEnvIORef forms = mapM (eval envIORef funcEnvIORef) forms
+evalForms envIORef funcEnvIORef = mapM (eval envIORef funcEnvIORef)
 
 returnLast :: [LispVal] -> ThrowsErrorIO LispVal
 returnLast = return . last
@@ -134,13 +134,13 @@ caseFunc envIORef funcEnvIORef (keyForm@(List _):clauses) = eval envIORef funcEn
                                                               chooseCase [List (Atom "otherwise":forms)] _ =
                                                                 evalFormsAndReturnLast envIORef funcEnvIORef forms
                                                               chooseCase [List (List keys:forms)] testKey =
-                                                                (liftThrowsError $ checkIfInList testKey keys) >>= \matchFound ->
+                                                                liftThrowsError (checkIfInList testKey keys) >>= \matchFound ->
                                                                     if matchFound then evalFormsAndReturnLast envIORef funcEnvIORef forms
                                                                     else chooseCase [] testKey
                                                               chooseCase [List (key:forms)] testKey =
                                                                 chooseCase [List (List [key]:forms)] testKey
                                                               chooseCase (List (List keys:forms):remainingClauses) testKey =
-                                                                (liftThrowsError $ checkIfInList testKey keys) >>= \matchFound ->
+                                                                liftThrowsError (checkIfInList testKey keys) >>= \matchFound ->
                                                                     if matchFound then evalFormsAndReturnLast envIORef funcEnvIORef forms
                                                                     else chooseCase remainingClauses testKey
                                                               chooseCase (List (key:forms):remainingClauses) testKey =
@@ -166,8 +166,7 @@ evalSetq envIORef funcEnvIORef l | length l /= 2 = throwError (NumArgsMismatch "
 -- apply
 apply :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
 apply _ _ [] = throwError (NumArgsMismatch ">= 1" [])
-apply envIORef funcEnvIORef (functionDesignator:spreadableListDesignator) = (liftM (:) processFunctionDesignator) <*> processSpreadableListDesignator >>=
-                                                                            return . List >>=
+apply envIORef funcEnvIORef (functionDesignator:spreadableListDesignator) = liftM List (liftM (:) processFunctionDesignator <*> processSpreadableListDesignator) >>=
                                                                             eval envIORef funcEnvIORef
     where processFunctionDesignator :: ThrowsErrorIO LispVal
           processFunctionDesignator = eval envIORef funcEnvIORef functionDesignator
@@ -183,8 +182,8 @@ apply envIORef funcEnvIORef (functionDesignator:spreadableListDesignator) = (lif
                                                     expandSpreadableListDesignator list =
                                                         if null list then return []
                                                         else case last list of
-                                                                    (List y) -> return $ (init list) ++ y
-                                                                    (DottedList y _) -> return $ (init list) ++ y
+                                                                    (List y) -> return $ init list ++ y
+                                                                    (DottedList y _) -> return $ init list ++ y
                                                                     _ -> return (init list)
 
                                                     -- we've already eval'ed the args, so make each evaled arg quoted so it won't be eval'ed
@@ -215,30 +214,30 @@ makeLambdaFunc (List funcParams:funcBody) envIORef funcEnvIORef = do
           notOptionalAtom _ = True
 
           createReqParamList :: [String]
-          createReqParamList = map show $ takeWhile (\x -> ((&&) (notOptionalAtom x) (notRestAtom x))) funcParams
+          createReqParamList = map show $ takeWhile (\x -> (&&) (notOptionalAtom x) (notRestAtom x)) funcParams
 
           createOptionalParamList :: EnvIORef -> ThrowsErrorIO (Maybe [String])
-          createOptionalParamList closure = if null optParams then return Nothing
-                                            else if length optParams == 1 then throwError (NumArgsMismatch ">= 1" optParams)
-                                            else liftM Just $ mapM bindOptParamDefaultValues $ tail optParams
-                                            where
-                                                optParams = takeWhile (notRestAtom) $ dropWhile (notOptionalAtom) funcParams
+          createOptionalParamList closure | null optParams = return Nothing
+                                          | length optParams == 1 = throwError (NumArgsMismatch ">= 1" optParams)
+                                          | otherwise = liftM Just $ mapM bindOptParamDefaultValues $ tail optParams
+                                          where
+                                              optParams = takeWhile notRestAtom $ dropWhile notOptionalAtom funcParams
 
-                                                bindOptParamDefaultValues :: LispVal -> ThrowsErrorIO String
-                                                bindOptParamDefaultValues (Atom x) = bindMultipleVars closure [(x, Bool False)] >> return x -- bind varName to NIL by default
-                                                bindOptParamDefaultValues (List [Atom x]) = bindMultipleVars closure [(x, Bool False)] >> return x -- bind varName to NIL by default
-                                                bindOptParamDefaultValues (List [Atom x, val]) = bindMultipleVars closure [(x, val)] >> return x -- don't evaluate val, just bind varName to it
-                                                bindOptParamDefaultValues (List [Atom x, val, Atom sVar]) = bindMultipleVars closure [(x, List [val, Atom sVar])] >> return x -- supplied p-param bound to NIL by default
-                                                bindOptParamDefaultValues x = throwError (NumArgsMismatch "<= 3" [x])
+                                              bindOptParamDefaultValues :: LispVal -> ThrowsErrorIO String
+                                              bindOptParamDefaultValues (Atom x) = bindMultipleVars closure [(x, Bool False)] >> return x -- bind varName to NIL by default
+                                              bindOptParamDefaultValues (List [Atom x]) = bindMultipleVars closure [(x, Bool False)] >> return x -- bind varName to NIL by default
+                                              bindOptParamDefaultValues (List [Atom x, val]) = bindMultipleVars closure [(x, val)] >> return x -- don't evaluate val, just bind varName to it
+                                              bindOptParamDefaultValues (List [Atom x, val, Atom sVar]) = bindMultipleVars closure [(x, List [val, Atom sVar])] >> return x -- supplied p-param bound to NIL by default
+                                              bindOptParamDefaultValues x = throwError (NumArgsMismatch "<= 3" [x])
 
           createRestParam :: EnvIORef -> ThrowsErrorIO (Maybe String)
-          createRestParam closure = if null restParam then return Nothing
-                                    else if length restParam /= 2 then throwError (NumArgsMismatch "2" restParam) -- only one specifier allowed for &rest
-                                    else case restParam !! 1 of -- &rest can only be followed by a symbol (atom)
+          createRestParam closure | null restParam = return Nothing
+                                  | length restParam /= 2 = throwError (NumArgsMismatch "2" restParam) -- only one specifier allowed for &rest
+                                  | otherwise = case restParam !! 1 of -- &rest can only be followed by a symbol (atom)
                                         (Atom x) -> bindMultipleVars closure [(x, Bool False)] >> (return . Just) x -- bind varName to NIL by default
                                         x -> throwError (TypeMismatch "Atom" x)
-                                    where
-                                        restParam = dropWhile notRestAtom funcParams
+                                  where
+                                      restParam = dropWhile notRestAtom funcParams
 makeLambdaFunc (x:_) _ _ = throwError (TypeMismatch "List" x)
 makeLambdaFunc x     _ _ = throwError (NumArgsMismatch "2" x)
 
@@ -255,15 +254,15 @@ defun x _ _ = throwError (NumArgsMismatch "2" x)
 --     b. else, an error is shown
 loadFile :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
 loadFile _        _            []                                                       = throwError (NumArgsMismatch "1" [])
-loadFile envIORef funcEnvIORef x@[String _]                                             = (open x) >>= readFileStream >>=
+loadFile envIORef funcEnvIORef x@[String _]                                             = open x >>= readFileStream >>=
                                                                                           liftThrowsError . parseListOfExpr >>=
                                                                                           evalFormsAndReturnLast envIORef funcEnvIORef
                                                                                           where
                                                                                               readFileStream :: LispVal -> ThrowsErrorIO String
                                                                                               readFileStream (FileStream h) = liftIO $ hGetContents h
                                                                                               readFileStream y = throwError (TypeMismatch "FileStream" y)
-loadFile envIORef funcEnvIORef [x@(String _), Keyword ":if-does-not-exist", Bool False] = (loadInputFileStream envIORef funcEnvIORef (Bool False) x)
-loadFile envIORef funcEnvIORef [x@(String _), Keyword ":if-does-not-exist", _]          = (loadInputFileStream envIORef funcEnvIORef (Bool True) x)
+loadFile envIORef funcEnvIORef [x@(String _), Keyword ":if-does-not-exist", Bool False] = loadInputFileStream envIORef funcEnvIORef (Bool False) x
+loadFile envIORef funcEnvIORef [x@(String _), Keyword ":if-does-not-exist", _]          = loadInputFileStream envIORef funcEnvIORef (Bool True) x
 loadFile _        _            x@[String _, Keyword ":if-does-not-exist"]               = throwError (NumArgsMismatch "3" x)
 loadFile _        _            x                                                        = throwError (TypeMismatch "String" (head x))
 
@@ -273,17 +272,17 @@ loadInputFileStream envIORef funcEnvIORef ifDoesNotExistVal = createFileStreamFo
 createFileStreamForLoad :: EnvIORef -> EnvIORef -> LispVal -> IOMode -> LispVal -> ThrowsErrorIO LispVal
 createFileStreamForLoad envIORef funcEnvIORef ifDoesNotExistVal = createFileStream (exceptionHandlerForLoad envIORef funcEnvIORef ifDoesNotExistVal)
 
-exceptionHandlerForLoad :: EnvIORef -> EnvIORef -> LispVal -> ((Either String Handle) -> ThrowsErrorIO LispVal)
+exceptionHandlerForLoad :: EnvIORef -> EnvIORef -> LispVal -> Either String Handle -> ThrowsErrorIO LispVal
 exceptionHandlerForLoad envIORef funcEnvIORef (Bool ifDoesNotExistVal) x = case x of
                                                                             Left err -> if ifDoesNotExistVal then throwError (Default err)
                                                                                         else return (Bool False)
-                                                                            Right h -> (liftIO $ hGetContents h) >>=
+                                                                            Right h -> liftIO (hGetContents h) >>=
                                                                                        liftThrowsError . parseListOfExpr >>=
                                                                                        evalFormsAndReturnLast envIORef funcEnvIORef
 exceptionHandlerForLoad _ _ x _ = throwError (TypeMismatch "Bool" x)
 
 -- primitives
-primitives :: [(String, ([LispVal] -> ThrowsError LispVal))]
+primitives :: [(String, [LispVal] -> ThrowsError LispVal)]
 primitives = [
                 -- numeric operations
                 ("+",            numericOp0OrMoreArgs 0 (+)),                     -- zero or more args
@@ -327,32 +326,32 @@ primitives = [
                 ("cons", cons),                                                   -- exactly two args
                 ("eql", eql),                                                     -- exactly two args
                 ("atom", atom),                                                   -- exactly one arg
-                ("weak_equal", weak_equal)                                        -- NOT a common lisp function. equivalence ignoring types. exactly two args
+                ("weakEqual", weakEqual)                                        -- NOT a common lisp function. equivalence ignoring types. exactly two args
              ]
 
 -- primitives - numeric ops
 numericOp0OrMoreArgs :: Integer -> (Integer -> Integer -> Integer) -> [LispVal] -> ThrowsError LispVal
-numericOp0OrMoreArgs start optParams l = return . Number =<< (liftM (foldl optParams start) (mapM extractNumber l))
+numericOp0OrMoreArgs start optParams l = return . Number =<< liftM (foldl optParams start) (mapM extractNumber l)
 
 numericOp1OrMoreArgs :: Integer -> (Integer -> Integer -> Integer) -> [LispVal] -> ThrowsError LispVal
 numericOp1OrMoreArgs _ _ [] = throwError (NumArgsMismatch ">=1" [])
-numericOp1OrMoreArgs start optParams l = return . Number =<< (liftM (foldl optParams start) (mapM extractNumber l))
+numericOp1OrMoreArgs start optParams l = return . Number =<< liftM (foldl optParams start) (mapM extractNumber l)
 
 -- 1+ and 1-
 numericOnePlusOneMinusOp :: (Integer -> Integer -> Integer) -> [LispVal] -> ThrowsError LispVal
 numericOnePlusOneMinusOp optParams l | length l /= 1 =  throwError (NumArgsMismatch "= 1" l)
-                              | otherwise     = return =<< (\x -> return $ Number $ optParams x 1) =<< extractNumber (head l)
+                                     | otherwise     = return =<< (\x -> return $ Number $ optParams x 1) =<< extractNumber (head l)
 
 -- mod and rem
 numericOpNArgs :: Int -> (Integer -> Integer -> Integer) -> [LispVal] -> ThrowsError LispVal
 numericOpNArgs n optParams l | length l /= n = throwError (NumArgsMismatch ("= " ++ show n) l)
-                      | otherwise     = return . Number =<< (\x -> return $ foldl optParams (head x) (tail x)) =<< (mapM extractNumber l)
+                             | otherwise     = return . Number =<< return . foldl1 optParams =<< mapM extractNumber l
 
 -- primitives - ops that return a boolean result
 -- generic boolean function that we use to build string or numeric specific function
 genericBoolOpNArgs :: (LispVal -> ThrowsError a) -> Int -> (a -> a -> Bool) -> [LispVal] -> ThrowsError LispVal
 genericBoolOpNArgs _ n _ l | length l /= n = throwError (NumArgsMismatch ("= " ++ show n) l)
-genericBoolOpNArgs extractFunc _ optParams l = return . Bool =<< (\x -> return $ foldl (f (head x)) True (tail x)) =<< (mapM extractFunc l)
+genericBoolOpNArgs extractFunc _ optParams l = return . Bool =<< (\x -> return $ foldl (f (head x)) True (tail x)) =<< mapM extractFunc l
     where f _ False _ = False
           f x _ y | x `optParams` y = True
                   | otherwise = False
@@ -367,16 +366,16 @@ boolStringOpTwoArgs :: (String -> String -> Bool) -> [LispVal] -> ThrowsError Li
 boolStringOpTwoArgs = genericBoolOpNArgs extractString 2
 
 -- for string-equal, string-lessp, string-greaterp, string-not-lesserp, string-not-greaterp
-ignorecase :: (String -> String -> Bool) -> (String -> String -> Bool)
-ignorecase optParams x y = (optParams (map toLower x) (map toLower y))
+ignorecase :: (String -> String -> Bool) -> String -> String -> Bool
+ignorecase optParams x y = optParams (map toLower x) (map toLower y)
 
 -- not
 -- CLisp 'not' works with generalized booleans. Returns true only if passed nil.
 booleanNotOp :: [LispVal] -> ThrowsError LispVal
 booleanNotOp l | length l /= 1 = throwError (NumArgsMismatch "= 1" l)
-              | otherwise     = case (head l) of
-                (Bool False) -> return $ Bool True
-                _            -> return $ Bool False
+               | otherwise     = case head l of
+                                     Bool False -> return $ Bool True
+                                     _          -> return $ Bool False
 
 -- or
 booleanOrOp :: [LispVal] -> ThrowsError LispVal
@@ -406,25 +405,25 @@ cdr :: [LispVal] -> ThrowsError LispVal
 cdr [List []] = return $ List []
 cdr [List [_]] = return $ List []
 cdr [List (_:x)] = return $ List x
-cdr [DottedList _ x] = return $ x
+cdr [DottedList _ x] = return x
 cdr _ = throwError $ Default "cdr needs a list as an argument"
 
 cons :: [LispVal] -> ThrowsError LispVal
-cons [x,(List y)] = return $ List $ x:y                 -- the second one's car becomes the first one's cdr
-cons [z,(DottedList x y)] = return $ DottedList (z:x) y -- the second one's car becomes the first one's cdr
+cons [x,List y] = return $ List $ x:y                 -- the second one's car becomes the first one's cdr
+cons [z,DottedList x y] = return $ DottedList (z:x) y -- the second one's car becomes the first one's cdr
 cons [x, y] = return $ DottedList [x] y                 -- non-list cdr's always make dotted lists
 cons x = throwError $ NumArgsMismatch "= 2" x
 
 -- primitives - equivalence ops
 eql :: [LispVal] -> ThrowsError LispVal
-eql [(Atom x), (Atom y)] = return $ Bool ((==) x y)
-eql [(Number x), (Number y)] = return $ Bool ((==) x y)
-eql [(Bool x), (Bool y)] = return $ Bool ((==) x y)
-eql [(String x), (String y)] = return $ Bool ((==) x y)
-eql [(List x), (List y)] | length x /= length y = return $ Bool False
+eql [Atom x, Atom y] = return $ Bool ((==) x y)
+eql [Number x, Number y] = return $ Bool ((==) x y)
+eql [Bool x, Bool y] = return $ Bool ((==) x y)
+eql [String x, String y] = return $ Bool ((==) x y)
+eql [List x, List y] | length x /= length y = return $ Bool False
                          | otherwise = return . Bool =<< liftM (all toBool) (mapM eql (zipIntoList x y))
-eql [(DottedList x1 x2), (DottedList y1 y2)] = eql [List (x1++[x2]), List (y1++[y2])]
-eql _ = return $ Bool $ False
+eql [DottedList x1 x2, DottedList y1 y2] = eql [List (x1++[x2]), List (y1++[y2])]
+eql _ = return $ Bool False
 
 toBool :: LispVal -> Bool
 toBool (Bool z) = z
@@ -433,11 +432,11 @@ toBool _ = False
 zipIntoList :: [LispVal] -> [LispVal] -> [[LispVal]]
 zipIntoList = zipWith (\a funcBody -> a:[funcBody])
 
-weak_equal:: [LispVal] -> ThrowsError LispVal
-weak_equal [(List x), (List y)] | length x /= length y = return $ Bool False
-                                | otherwise = return . Bool =<< liftM (all toBool) (mapM weak_equal (zipIntoList x y))
-weak_equal [(DottedList x1 x2), (DottedList y1 y2)] = weak_equal [List (x1++[x2]), List (y1++[y2])]
-weak_equal m@[x, y] = return . Bool . any id  =<< (liftM (:) eqlResult) <*> mapM (extractAndCheckPrimitiveEquality x y) primitiveEqualityFunctions
+weakEqual:: [LispVal] -> ThrowsError LispVal
+weakEqual [List x, List y] | length x /= length y = return $ Bool False
+                           | otherwise = return . Bool =<< liftM (all toBool) (mapM weakEqual (zipIntoList x y))
+weakEqual [DottedList x1 x2, DottedList y1 y2] = weakEqual [List (x1++[x2]), List (y1++[y2])]
+weakEqual m@[x, y] = return . Bool . or =<< liftM (:) eqlResult <*> mapM (extractAndCheckPrimitiveEquality x y) primitiveEqualityFunctions
                       where
                             eqlResult :: ThrowsError Bool
                             eqlResult = f =<< eql m
@@ -449,7 +448,7 @@ weak_equal m@[x, y] = return . Bool . any id  =<< (liftM (:) eqlResult) <*> mapM
                             -- this is a heterogenous list!!
                             primitiveEqualityFunctions :: [Extractor]
                             primitiveEqualityFunctions = [Extractor extractBool, Extractor extractString, Extractor extractNumber]
-weak_equal _ = return $ Bool False
+weakEqual _ = return $ Bool False
 
 -- atom
 --   atom == not cons
@@ -460,7 +459,7 @@ atom [_] = return $ Bool True
 atom x = throwError (NumArgsMismatch "1" x)
 
 -- primitives - io functions
-ioPrimitives :: [(String, ([LispVal] -> ThrowsErrorIO LispVal))]
+ioPrimitives :: [(String, [LispVal] -> ThrowsErrorIO LispVal)]
 ioPrimitives = [
                 ("open",            open),
                 ("close",           close),
@@ -492,12 +491,12 @@ createIOFileStream = createFileStreamForOpen ReadWriteMode
 createFileStreamForOpen :: IOMode -> LispVal -> ThrowsErrorIO LispVal
 createFileStreamForOpen = createFileStream exceptionHandlerForOpen
 
-exceptionHandlerForOpen :: ((Either String Handle) -> ThrowsErrorIO LispVal)
+exceptionHandlerForOpen :: (Either String Handle -> ThrowsErrorIO LispVal)
 exceptionHandlerForOpen x = case x of
                                 Left err -> throwError (Default err)
                                 Right h -> return $ FileStream h
 
-createFileStream :: ((Either String Handle) -> ThrowsErrorIO LispVal) -> IOMode -> LispVal -> ThrowsErrorIO LispVal
+createFileStream :: (Either String Handle -> ThrowsErrorIO LispVal) -> IOMode -> LispVal -> ThrowsErrorIO LispVal
 createFileStream handler ioMode (String filePath) =  openfile filePath ioMode >>= handler
 createFileStream _ _ x = throwError (TypeMismatch "String" x)
 
@@ -505,12 +504,13 @@ createFileStream _ _ x = throwError (TypeMismatch "String" x)
 openfile :: String -> IOMode -> ThrowsErrorIO (Either String Handle)
 openfile filePath ioMode = liftIO $ catch
                                     (liftM Right $ openFile filePath ioMode)
-                                    (\(e :: IOException) -> if (isAlreadyInUseError e) then
-                                                                return (Left $ "file " ++ filePath ++ " already in use")
-                                                            else if (isDoesNotExistError e) then
-                                                                return (Left $ "file " ++ filePath ++ " does not exist")
-                                                            else -- isPermissionError
-                                                                return (Left $ "no permission to open file " ++ filePath))
+                                    (\(e :: IOException) -> return . Left $
+                                                                if isAlreadyInUseError e then
+                                                                    "file " ++ filePath ++ " already in use"
+                                                                else if isDoesNotExistError e then
+                                                                    "file " ++ filePath ++ " does not exist"
+                                                                else -- isPermissionError
+                                                                    "no permission to open file " ++ filePath)
 
 -- close
 --   in this implementation, closing an already closed stream is not an error
@@ -524,13 +524,13 @@ close x = throwError (TypeMismatch "FileStream" (head x))
 --   it does nothing to the environment
 read :: [LispVal] -> ThrowsErrorIO LispVal
 read [] = read [FileStream stdin]
-read [FileStream x] = (liftIO $ hGetLine x) >>= liftThrowsError . parseSingleExpr
+read [FileStream x] = liftIO (hGetLine x) >>= liftThrowsError . parseSingleExpr
 read x = throwError (TypeMismatch "FileStream or []" (head x))
 
 -- prin1
 prin1 :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
-prin1 _ _ [obj] = liftIO $ hPutStr stdout (show obj) >> return obj
-prin1 envIORef funcEnvIORef [obj, filestream] = (eval envIORef funcEnvIORef filestream) >>= prin1'
+prin1 _ _ [obj] = liftIO $ putStr (show obj) >> return obj
+prin1 envIORef funcEnvIORef [obj, filestream] = eval envIORef funcEnvIORef filestream >>= prin1'
                                         where prin1' :: LispVal -> ThrowsErrorIO LispVal
                                               prin1' (FileStream h) = do
                                                 isFileWritable <- liftIO $ hIsWritable h
@@ -542,12 +542,12 @@ prin1 _ _ _ = throwError (Default "incorrect parameters for prin1")
 -- print
 --   same as prin1 except prints a newline at the beginning and a space at the end
 printFunc :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
-printFunc _ _ [obj] = liftIO $ hPutStr stdout ("\n" ++ (show obj) ++ " ") >> return obj
-printFunc envIORef funcEnvIORef [obj, filestream] = (eval envIORef funcEnvIORef filestream) >>= printFunc'
+printFunc _ _ [obj] = liftIO $ putStr ("\n" ++ show obj ++ " ") >> return obj
+printFunc envIORef funcEnvIORef [obj, filestream] = eval envIORef funcEnvIORef filestream >>= printFunc'
                                         where printFunc' :: LispVal -> ThrowsErrorIO LispVal
                                               printFunc' (FileStream h) = do
                                                 isFileWritable <- liftIO $ hIsWritable h
-                                                if isFileWritable then liftIO $ hPutStr h ("\n" ++ (show obj) ++ " ") >> return obj
+                                                if isFileWritable then liftIO $ hPutStr h ("\n" ++ show obj ++ " ") >> return obj
                                                 else throwError (Default "not an output stream")
                                               printFunc' z = throwError (TypeMismatch "FileStream" z)
 printFunc _ _ _ = throwError (Default "incorrect parameters for print")
@@ -556,12 +556,14 @@ printFunc _ _ _ = throwError (Default "incorrect parameters for print")
 -- helper functions
 --------------------------------------
 extractAndCheckPrimitiveEquality :: LispVal -> LispVal -> Extractor -> ThrowsError Bool
-extractAndCheckPrimitiveEquality x y (Extractor extractFunc) = do
-    catchError (do{
-        extractedX <- extractFunc x;
-        extractedY <- extractFunc y;
-        return $ extractedX == extractedY})
-        (const (return False))
+extractAndCheckPrimitiveEquality x y (Extractor extractFunc) = catchError checkEquality
+                                                                (const (return False))
+                                                                where
+                                                                    checkEquality :: ThrowsError Bool
+                                                                    checkEquality = do
+                                                                                        extractedX <- extractFunc x;
+                                                                                        extractedY <- extractFunc y;
+                                                                                        return $ extractedX == extractedY
 
 extractBool :: LispVal -> ThrowsError Bool
 extractBool (Bool x) = return x
