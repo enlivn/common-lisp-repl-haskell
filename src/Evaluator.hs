@@ -13,7 +13,7 @@ import System.IO.Error (isAlreadyInUseError, isDoesNotExistError)
 import Parser
 import Prelude hiding (read)
 
--- TODO: add eval, with-open-file, funcall, write-string, function, backquoted list
+-- TODO: add eval, with-open-file, funcall, function, backquoted list
 
 eval :: EnvIORef -> EnvIORef -> LispVal -> ThrowsErrorIO LispVal
 -- primitives
@@ -192,13 +192,15 @@ evalSetq envIORef funcEnvIORef l | length l /= 2 = throwError (NumArgsMismatch "
 -- apply
 apply :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
 apply _ _ [] = throwError (NumArgsMismatch ">= 1" [])
-apply envIORef funcEnvIORef (functionDesignator:spreadableListDesignator) = liftM List (liftM (:) processFunctionDesignator <*> processSpreadableListDesignator) >>=
-                                                                            eval envIORef funcEnvIORef
+apply envIORef funcEnvIORef (functionDesignator:spreadableListDesignator) = do
+                                                                                evaledFunc <- processFunctionDesignator
+                                                                                evaledArgs <- processSpreadableListDesignator
+                                                                                evalFunc evaledFunc evaledArgs
     where processFunctionDesignator :: ThrowsErrorIO LispVal
           processFunctionDesignator = eval envIORef funcEnvIORef functionDesignator
 
           processSpreadableListDesignator :: ThrowsErrorIO [LispVal]
-          processSpreadableListDesignator = evalForms envIORef funcEnvIORef spreadableListDesignator >>= expandSpreadableListDesignator >>= mapM makeQuoted
+          processSpreadableListDesignator = evalForms envIORef funcEnvIORef spreadableListDesignator >>= expandSpreadableListDesignator
 
                                                 where
                                                     -- if the last element of the spreadable argument list is a list, extract and append those values
@@ -211,11 +213,6 @@ apply envIORef funcEnvIORef (functionDesignator:spreadableListDesignator) = lift
                                                                     (List y) -> return $ init list ++ y
                                                                     (DottedList y _) -> return $ init list ++ y
                                                                     _ -> return (init list)
-
-                                                    -- we've already eval'ed the args, so make each evaled arg quoted so it won't be eval'ed
-                                                    -- when we finally evaluate this function in eval
-                                                    makeQuoted :: LispVal -> ThrowsErrorIO LispVal
-                                                    makeQuoted x = return $ List [Atom "quoted",x]
 
 -- lambda
 makeLambdaFunc :: [LispVal] -> EnvIORef -> EnvIORef -> ThrowsErrorIO LispVal
