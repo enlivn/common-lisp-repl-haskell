@@ -42,18 +42,19 @@ eval envIORef funcEnvIORef (List (Atom "defun":nameAndParamsAndBody))        = d
 eval envIORef funcEnvIORef (List (Atom "load":loadArgs))                     = loadFile envIORef funcEnvIORef loadArgs
 eval envIORef funcEnvIORef (List (Atom "prin1":prin1Args))                   = prin1 =<< evalForms envIORef funcEnvIORef prin1Args
 eval envIORef funcEnvIORef (List (Atom "print":printArgs))                   = printFunc =<< evalForms envIORef funcEnvIORef printArgs
-eval envIORef funcEnvIORef (List (Atom "write-string":printArgs))            = writeString =<< evalForms envIORef funcEnvIORef printArgs
+eval envIORef funcEnvIORef (List (Atom "write-string":writeStringArgs))      = writeString =<< evalForms envIORef funcEnvIORef writeStringArgs
+eval envIORef funcEnvIORef (List (Atom "function":functionArgs))             = function envIORef funcEnvIORef functionArgs
 eval envIORef funcEnvIORef (List (func:args))                                = do
-                                                                                evaledFunc <- getFunc func
+                                                                                evaledFunc <- getFunc envIORef funcEnvIORef func
                                                                                 evaledArgs <- evalForms envIORef funcEnvIORef args
                                                                                 -- note we don't pass in the environment here because
                                                                                 -- a function carries its own lexical environment
                                                                                 evalFunc evaledFunc evaledArgs
-                                                                                where getFunc :: LispVal -> ThrowsErrorIO LispVal
-                                                                                      getFunc (Atom x) = getVar funcEnvIORef x -- lookup symbols in the func namespace
-                                                                                      getFunc x = eval envIORef funcEnvIORef x
 eval _        _            x                                                 = throwError (Default (show x))
 
+getFunc :: EnvIORef -> EnvIORef -> LispVal -> ThrowsErrorIO LispVal
+getFunc _ funcEnvIORef (Atom x) = getVar funcEnvIORef x -- lookup symbols in the func namespace
+getFunc envIORef funcEnvIORef x = eval envIORef funcEnvIORef x
 
 evalFormsAndReturnLast :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
 evalFormsAndReturnLast envIORef funcEnvIORef forms = evalForms envIORef funcEnvIORef forms >>= returnLast
@@ -337,6 +338,13 @@ writeStringToFile x (FileStream h) = do
                                                               (liftM Right $ hIsWritable h)
                                                               (\(_ :: IOException) -> return . Left $ show h ++ " is closed")
 writeStringToFile _ z = throwError (TypeMismatch "FileStream" z)
+
+-- function
+function :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
+function _ _ [] = throwError (NumArgsMismatch "1" [])
+function _ funcEnvIORef [Atom x] = getVar funcEnvIORef x -- lookup symbols in the func namespace
+function envIORef funcEnvIORef [x@(List (Atom "lambda":_))] = eval envIORef funcEnvIORef x -- evaluate the lambda
+function _ _ x = throwError (TypeMismatch "Atom or Lambda" (head x))
 
 -- primitives
 primitives :: [(String, [LispVal] -> ThrowsError LispVal)]
