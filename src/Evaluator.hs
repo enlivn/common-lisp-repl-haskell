@@ -13,7 +13,8 @@ import System.IO.Error (isAlreadyInUseError, isDoesNotExistError)
 import Parser
 import Prelude hiding (read)
 
--- TODO: add eval, with-open-file, funcall, function, backquoted list
+-- TODO: with-open-file, string-downcase, string-upcase, subseq, length
+-- TODO: eval, backquoted list
 
 eval :: EnvIORef -> EnvIORef -> LispVal -> ThrowsErrorIO LispVal
 -- primitives
@@ -26,6 +27,7 @@ eval envIORef funcEnvIORef (DottedList x y)                                  = e
 eval _        _            (List [])                                         = return $ Bool False
 -- quoted forms
 eval _        _            (List [Atom "quoted", val])                       = return val
+eval _        _            (List (Atom "quote":val))                         = quote val
 -- conditionals
 eval envIORef funcEnvIORef (List (Atom "case":forms))                        = caseFunc envIORef funcEnvIORef forms
 eval envIORef funcEnvIORef (List (Atom "cond":forms))                        = condFunc envIORef funcEnvIORef forms
@@ -37,6 +39,7 @@ eval envIORef funcEnvIORef (List [Atom "if", predicate, thenForm, elseForm]) = e
 -- functions
 eval envIORef funcEnvIORef (List (Atom "setq":newValue))                     = evalSetq envIORef funcEnvIORef newValue
 eval envIORef funcEnvIORef (List (Atom "apply":funcParamsAndBody))           = apply envIORef funcEnvIORef funcParamsAndBody
+eval envIORef funcEnvIORef (List (Atom "funcall":funcallArgs))               = funcall envIORef funcEnvIORef funcallArgs
 eval envIORef funcEnvIORef (List (Atom "lambda":paramsAndBody))              = makeLambdaFunc paramsAndBody envIORef funcEnvIORef
 eval envIORef funcEnvIORef (List (Atom "defun":nameAndParamsAndBody))        = defun nameAndParamsAndBody envIORef funcEnvIORef
 eval envIORef funcEnvIORef (List (Atom "load":loadArgs))                     = loadFile envIORef funcEnvIORef loadArgs
@@ -129,6 +132,11 @@ evalFunc (Func reqParams optParams restParam funcBody closure funcEnvIORef) args
 
 evalFunc x _ = throwError (TypeMismatch "Function" x)
 
+-- quote
+quote :: [LispVal] -> ThrowsErrorIO LispVal
+quote [x] = return x
+quote x = throwError (NumArgsMismatch "1" x)
+
 -- case
 caseFunc :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
 caseFunc _ _ [] = throwError (NumArgsMismatch "1" [])
@@ -194,12 +202,10 @@ evalSetq envIORef funcEnvIORef l | length l /= 2 = throwError (NumArgsMismatch "
 apply :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
 apply _ _ [] = throwError (NumArgsMismatch ">= 1" [])
 apply envIORef funcEnvIORef (functionDesignator:spreadableListDesignator) = do
-                                                                                evaledFunc <- processFunctionDesignator
+                                                                                evaledFunc <- processFunctionDesignator envIORef funcEnvIORef functionDesignator
                                                                                 evaledArgs <- processSpreadableListDesignator
                                                                                 evalFunc evaledFunc evaledArgs
-    where processFunctionDesignator :: ThrowsErrorIO LispVal
-          processFunctionDesignator = eval envIORef funcEnvIORef functionDesignator
-
+    where
           processSpreadableListDesignator :: ThrowsErrorIO [LispVal]
           processSpreadableListDesignator = evalForms envIORef funcEnvIORef spreadableListDesignator >>= expandSpreadableListDesignator
 
@@ -214,6 +220,21 @@ apply envIORef funcEnvIORef (functionDesignator:spreadableListDesignator) = do
                                                                     (List y) -> return $ init list ++ y
                                                                     (DottedList y _) -> return $ init list ++ y
                                                                     _ -> return (init list)
+
+-- funcall
+funcall :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
+funcall _ _ [] = throwError (NumArgsMismatch ">= 1" [])
+funcall envIORef funcEnvIORef (functionDesignator:forms) = do
+                                                            evaledFunc <- processFunctionDesignator envIORef funcEnvIORef functionDesignator
+                                                            evaledArgs <- evalForms envIORef funcEnvIORef forms
+                                                            evalFunc evaledFunc evaledArgs
+
+processFunctionDesignator :: EnvIORef -> EnvIORef -> LispVal -> ThrowsErrorIO LispVal
+processFunctionDesignator envIORef funcEnvIORef functionDesignator = eval envIORef funcEnvIORef functionDesignator >>= coerceSymbolToFunction
+    where coerceSymbolToFunction :: LispVal -> ThrowsErrorIO LispVal
+          coerceSymbolToFunction result = case result of
+                                      x@(Atom _) -> getFunc envIORef funcEnvIORef x
+                                      x -> return x
 
 -- lambda
 makeLambdaFunc :: [LispVal] -> EnvIORef -> EnvIORef -> ThrowsErrorIO LispVal
