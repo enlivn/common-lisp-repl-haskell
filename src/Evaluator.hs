@@ -410,9 +410,12 @@ primitives = [
                 ("car", car),                                                     -- exactly one arg
                 ("cdr", cdr),                                                     -- exactly one arg
                 ("cons", cons),                                                   -- exactly two args
-                ("eql", eql),                                                     -- exactly two args
-                ("atom", atom),                                                   -- exactly one arg
                 ("length", lengthFunc),                                           -- exactly one arg
+                ("subseq", subseq),                                               -- exactly two or three args
+
+                -- other operations
+                ("atom", atom),                                                   -- exactly one arg
+                ("eql", eql),                                                     -- exactly two args
                 ("weakEqual", weakEqual)                                          -- NOT a common lisp function. equivalence ignoring types. exactly two args
              ]
 
@@ -501,6 +504,37 @@ cons [z,DottedList x y] = return $ DottedList (z:x) y -- the second one's car be
 cons [x, y] = return $ DottedList [x] y                 -- non-list cdr's always make dotted lists
 cons x = throwError $ NumArgsMismatch "= 2" x
 
+-- length
+lengthFunc :: [LispVal] -> ThrowsError LispVal
+lengthFunc [List x] = return . Number . toInteger . length $ x
+lengthFunc [String x] = return . Number . toInteger . length $ x
+lengthFunc x = throwError (TypeMismatch "List or String" (head x))
+
+-- subseq
+subseq :: [LispVal] -> ThrowsError LispVal
+subseq [List x@[_]] = throwError $ (NumArgsMismatch ">= 2" x)
+subseq y@[List x, Number _] = subseq (y ++ [Number $ (fromIntegral . length) x])
+subseq [List x, Number start, Number end] | start < 0 = throwError (Default "start index must be non-negative")
+                                          | end < 0 = throwError (Default "end index must be non-negative")
+                                          | end > (fromIntegral $ length x) = throwError (Default $ "end index cannot exceed " ++ (show $ length x))
+                                          | start > end = throwError (Default $ "start index = " ++ show start ++ " cannot exceed end index = " ++ show end)
+                                          | otherwise = return . List . take (fromIntegral (end - start)) . drop (fromIntegral start) $ x
+subseq y@[String x, Number _] = subseq (y ++ [Number $ (fromIntegral . length) x])
+subseq [String x, Number start, Number end] | start < 0 = throwError (Default "start index must be non-negative")
+                                          | end < 0 = throwError (Default "end index must be non-negative")
+                                          | end > (fromIntegral $ length x) = throwError (Default $ "end index cannot exceed " ++ (show $ length x))
+                                          | start > end = throwError (Default $ "start index = " ++ show start ++ " cannot exceed end index = " ++ show end)
+                                          | otherwise = return . String . take (fromIntegral (end - start)) . drop (fromIntegral start) $ x
+subseq x = throwError (TypeMismatch "List or String" (head x))
+
+-- atom
+--   atom == not cons
+atom :: [LispVal] -> ThrowsError LispVal
+atom [List _] = return $ Bool False
+atom [DottedList _ _] = return $ Bool False
+atom [_] = return $ Bool True
+atom x = throwError (NumArgsMismatch "1" x)
+
 -- primitives - equivalence ops
 eql :: [LispVal] -> ThrowsError LispVal
 eql [Atom x, Atom y] = return $ Bool ((==) x y)
@@ -536,20 +570,6 @@ weakEqual m@[x, y] = return . Bool . or =<< liftM (:) eqlResult <*> mapM (extrac
                             primitiveEqualityFunctions :: [Extractor]
                             primitiveEqualityFunctions = [Extractor extractBool, Extractor extractString, Extractor extractNumber]
 weakEqual _ = return $ Bool False
-
--- atom
---   atom == not cons
-atom :: [LispVal] -> ThrowsError LispVal
-atom [List _] = return $ Bool False
-atom [DottedList _ _] = return $ Bool False
-atom [_] = return $ Bool True
-atom x = throwError (NumArgsMismatch "1" x)
-
--- length
-lengthFunc :: [LispVal] -> ThrowsError LispVal
-lengthFunc [List x] = return . Number . toInteger . length $ x
-lengthFunc [String x] = return . Number . toInteger . length $ x
-lengthFunc x = throwError (TypeMismatch "List or String" (head x))
 
 -- primitives - io functions
 ioPrimitives :: [(String, [LispVal] -> ThrowsErrorIO LispVal)]
