@@ -13,7 +13,7 @@ import System.IO.Error (isAlreadyInUseError, isDoesNotExistError)
 import Parser
 import Prelude hiding (read)
 
--- TODO: with-open-file, string-downcase, string-upcase, subseq, length
+-- TODO: with-open-file, string-downcase, string-upcase, subseq
 -- TODO: eval, backquoted list
 
 eval :: EnvIORef -> EnvIORef -> LispVal -> ThrowsErrorIO LispVal
@@ -412,7 +412,8 @@ primitives = [
                 ("cons", cons),                                                   -- exactly two args
                 ("eql", eql),                                                     -- exactly two args
                 ("atom", atom),                                                   -- exactly one arg
-                ("weakEqual", weakEqual)                                        -- NOT a common lisp function. equivalence ignoring types. exactly two args
+                ("length", lengthFunc),                                           -- exactly one arg
+                ("weakEqual", weakEqual)                                          -- NOT a common lisp function. equivalence ignoring types. exactly two args
              ]
 
 -- primitives - numeric ops
@@ -543,6 +544,12 @@ atom [List _] = return $ Bool False
 atom [DottedList _ _] = return $ Bool False
 atom [_] = return $ Bool True
 atom x = throwError (NumArgsMismatch "1" x)
+
+-- length
+lengthFunc :: [LispVal] -> ThrowsError LispVal
+lengthFunc [List x] = return . Number . toInteger . length $ x
+lengthFunc [String x] = return . Number . toInteger . length $ x
+lengthFunc x = throwError (TypeMismatch "List or String" (head x))
 
 -- primitives - io functions
 ioPrimitives :: [(String, [LispVal] -> ThrowsErrorIO LispVal)]
