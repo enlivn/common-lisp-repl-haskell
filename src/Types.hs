@@ -5,6 +5,7 @@ import Text.ParserCombinators.Parsec hiding (spaces)
 import Control.Monad.Error
 import Data.IORef
 import System.IO (Handle)
+import Data.Maybe (fromMaybe)
 
 type Env = [(String, IORef LispVal)]
 
@@ -25,12 +26,14 @@ data LispVal =  Atom String |
                 List [LispVal] |
                 DottedList [LispVal] LispVal |
                 PrimitiveFunc ([LispVal] -> ThrowsError LispVal) |
-                Func {requiredParams :: [String],
+                Func {
+                      requiredParams :: [String],
                       optionalParams :: Maybe [String],
                       restParams :: Maybe String,
                       body :: [LispVal],
                       closureEnv :: EnvIORef,
-                      funcClosureEnv :: EnvIORef} | -- the function carries around its own environment with bound params. this gives us lexical scoping
+                      funcClosureEnv :: EnvIORef
+                     } | -- the function carries around its own environment with bound params. this gives us lexical scoping
                 FileStream Handle |
                 IOFunc ([LispVal] -> ThrowsErrorIO LispVal)
 

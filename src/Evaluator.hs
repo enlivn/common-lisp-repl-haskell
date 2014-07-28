@@ -3,7 +3,7 @@ module Evaluator where
 
 import Types
 import Control.Monad.Error
-import Data.Char (toLower)
+import Data.Char (toLower, toUpper)
 import Control.Applicative ((<*>))
 import Control.Exception
 import Monad
@@ -13,7 +13,7 @@ import System.IO.Error (isAlreadyInUseError, isDoesNotExistError)
 import Parser
 import Prelude hiding (read)
 
--- TODO: with-open-file, string-downcase, string-upcase, subseq
+-- TODO: with-open-file
 -- TODO: eval, backquoted list
 
 eval :: EnvIORef -> EnvIORef -> LispVal -> ThrowsErrorIO LispVal
@@ -195,7 +195,7 @@ isNil _ = return False
 evalSetq :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
 evalSetq envIORef funcEnvIORef l | length l /= 2 = throwError (NumArgsMismatch "2" l)
                                  | otherwise = case l of
-                                     [Atom varName, value] -> setOrCreateVar envIORef varName =<< eval envIORef funcEnvIORef value
+                                     [Atom varName, val] -> setOrCreateVar envIORef varName =<< eval envIORef funcEnvIORef val
                                      x -> throwError (TypeMismatch "Atom" (head x))
 
 -- apply
@@ -405,6 +405,8 @@ primitives = [
                 ("string-not-greaterp", boolStringOpTwoArgs (ignorecase (<=))),   -- exactly two args
                 ("string>=",     boolStringOpTwoArgs (>=)),                       -- exactly two args
                 ("string-not-lesserp", boolStringOpTwoArgs (ignorecase (>=))),    -- exactly two args
+                ("string-downcase", stringDowncase),                              -- exactly two or three args
+                ("string-upcase", stringUpcase),                                  -- exactly two or three args
 
                 -- list operations
                 ("car", car),                                                     -- exactly one arg
@@ -458,6 +460,57 @@ boolStringOpTwoArgs = genericBoolOpNArgs extractString 2
 -- for string-equal, string-lessp, string-greaterp, string-not-lesserp, string-not-greaterp
 ignorecase :: (String -> String -> Bool) -> String -> String -> Bool
 ignorecase optParams x y = optParams (map toLower x) (map toLower y)
+
+-- stringDowncase
+stringUpcase :: [LispVal] -> ThrowsError LispVal
+stringUpcase = stringChangeCase (map toUpper)
+
+stringDowncase :: [LispVal] -> ThrowsError LispVal
+stringDowncase = stringChangeCase (map toLower)
+
+stringChangeCase :: (String -> String) -> [LispVal] -> ThrowsError LispVal
+stringChangeCase changeCaseFn (x@(String s):args) = processKeywords args keywordOptions >>= stringChangeCase' . ((:) x)
+        where
+            keywordOptions :: [(String, LispVal)]
+            keywordOptions = [
+                                (":start" , Number 0),
+                                (":end", Number $ (fromIntegral . length) s)
+                             ]
+
+            stringChangeCase' :: [LispVal] -> ThrowsError LispVal
+            stringChangeCase' [] = throwError (NumArgsMismatch "1" [])
+            stringChangeCase' y@[String str] = stringChangeCase' (y ++ [Number 0] ++ [Number $ (fromIntegral . length) str])
+            stringChangeCase' [String str, Number start, Number end]
+                | start < 0 = throwError (Default "start index must be non-negative")
+                | end < 0 = throwError (Default "end index must be non-negative")
+                | end > (fromIntegral $ length str) = throwError (Default $ "end index cannot exceed " ++ (show $ length str))
+                | start > end = throwError (Default $ "start index = " ++ show start ++ " cannot exceed end index = " ++ show end)
+                | otherwise = return $ String ((fst pre) ++ changeCaseFn (fst post) ++ (snd post))
+                              where pre = splitAt (fromIntegral start) str
+                                    post = splitAt (fromIntegral (end - start)) (snd pre)
+            stringChangeCase' y = throwError (TypeMismatch "String" (head y))
+stringChangeCase _ x = throwError (TypeMismatch "String" (head x))
+
+processKeywords :: [LispVal] -> [(String, LispVal)] -> ThrowsError [LispVal]
+processKeywords args defaultOptions = collectArgs args >>= lookupArgs
+    where
+        lookupArgs :: [(String, LispVal)] -> ThrowsError [LispVal]
+        lookupArgs foundOptions = mapM (replaceDefaultValIfAvailable foundOptions) defaultOptions
+
+        replaceDefaultValIfAvailable :: [(String, LispVal)] -> (String, LispVal) -> ThrowsError LispVal
+        replaceDefaultValIfAvailable foundOptions (k, v) = case lookup k foundOptions of
+            Nothing -> return v
+            Just foundVal -> return foundVal
+
+        collectArgs :: [LispVal] -> ThrowsError [(String, LispVal)]
+        collectArgs [] = return []
+        collectArgs (Keyword k:v@(Number _):ys) = (liftM (++) (createOption k v)) <*> (collectArgs ys)
+        collectArgs y = throwError (TypeMismatch ("Keyword (allowed keywords are: " ++ ((unwords . map (show . fst)) defaultOptions) ++ ")") (head y))
+
+        createOption :: String -> LispVal -> ThrowsError [(String, LispVal)]
+        createOption k v = case lookup k defaultOptions of
+            Nothing -> throwError (Default $ "invalid keyword " ++ k ++ ", allowed keywords are: " ++ (unwords . map (show . fst)) defaultOptions)
+            Just _ -> return [(k, v)]
 
 -- not
 -- CLisp 'not' works with generalized booleans. Returns true only if passed nil.
@@ -521,10 +574,10 @@ subseq [List x, Number start, Number end] | start < 0 = throwError (Default "sta
                                           | otherwise = return . List . take (fromIntegral (end - start)) . drop (fromIntegral start) $ x
 subseq y@[String x, Number _] = subseq (y ++ [Number $ (fromIntegral . length) x])
 subseq [String x, Number start, Number end] | start < 0 = throwError (Default "start index must be non-negative")
-                                          | end < 0 = throwError (Default "end index must be non-negative")
-                                          | end > (fromIntegral $ length x) = throwError (Default $ "end index cannot exceed " ++ (show $ length x))
-                                          | start > end = throwError (Default $ "start index = " ++ show start ++ " cannot exceed end index = " ++ show end)
-                                          | otherwise = return . String . take (fromIntegral (end - start)) . drop (fromIntegral start) $ x
+                                            | end < 0 = throwError (Default "end index must be non-negative")
+                                            | end > (fromIntegral $ length x) = throwError (Default $ "end index cannot exceed " ++ (show $ length x))
+                                            | start > end = throwError (Default $ "start index = " ++ show start ++ " cannot exceed end index = " ++ show end)
+                                            | otherwise = return . String . take (fromIntegral (end - start)) . drop (fromIntegral start) $ x
 subseq x = throwError (TypeMismatch "List or String" (head x))
 
 -- atom
