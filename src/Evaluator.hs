@@ -469,7 +469,8 @@ stringDowncase :: [LispVal] -> ThrowsError LispVal
 stringDowncase = stringChangeCase (map toLower)
 
 stringChangeCase :: (String -> String) -> [LispVal] -> ThrowsError LispVal
-stringChangeCase changeCaseFn (x@(String s):args) = processKeywords args keywordOptions >>= stringChangeCase' . ((:) x)
+stringChangeCase _ [] = throwError (NumArgsMismatch "1" [])
+stringChangeCase changeCaseFn (String s:args) = processKeywords args keywordOptions >>= stringChangeCase'
         where
             keywordOptions :: [(String, LispVal)]
             keywordOptions = [
@@ -478,17 +479,15 @@ stringChangeCase changeCaseFn (x@(String s):args) = processKeywords args keyword
                              ]
 
             stringChangeCase' :: [LispVal] -> ThrowsError LispVal
-            stringChangeCase' [] = throwError (NumArgsMismatch "1" [])
-            stringChangeCase' y@[String str] = stringChangeCase' (y ++ [Number 0] ++ [Number $ (fromIntegral . length) str])
-            stringChangeCase' [String str, Number start, Number end]
+            stringChangeCase' [Number start, Number end]
                 | start < 0 = throwError (Default "start index must be non-negative")
                 | end < 0 = throwError (Default "end index must be non-negative")
-                | end > (fromIntegral $ length str) = throwError (Default $ "end index cannot exceed " ++ (show $ length str))
+                | end > (fromIntegral $ length s) = throwError (Default $ "end index cannot exceed " ++ (show $ length s))
                 | start > end = throwError (Default $ "start index = " ++ show start ++ " cannot exceed end index = " ++ show end)
                 | otherwise = return $ String ((fst pre) ++ changeCaseFn (fst post) ++ (snd post))
-                              where pre = splitAt (fromIntegral start) str
+                              where pre = splitAt (fromIntegral start) s
                                     post = splitAt (fromIntegral (end - start)) (snd pre)
-            stringChangeCase' y = throwError (TypeMismatch "String" (head y))
+            stringChangeCase' x = throwError (TypeMismatch "Number" (head x))
 stringChangeCase _ x = throwError (TypeMismatch "String" (head x))
 
 processKeywords :: [LispVal] -> [(String, LispVal)] -> ThrowsError [LispVal]
@@ -504,7 +503,7 @@ processKeywords args defaultOptions = collectArgs args >>= lookupArgs
 
         collectArgs :: [LispVal] -> ThrowsError [(String, LispVal)]
         collectArgs [] = return []
-        collectArgs (Keyword k:v@(Number _):ys) = (liftM (++) (createOption k v)) <*> (collectArgs ys)
+        collectArgs (Keyword k:v:ys) = (liftM (++) (createOption k v)) <*> (collectArgs ys)
         collectArgs y = throwError (TypeMismatch ("Keyword (allowed keywords are: " ++ ((unwords . map (show . fst)) defaultOptions) ++ ")") (head y))
 
         createOption :: String -> LispVal -> ThrowsError [(String, LispVal)]
@@ -636,10 +635,20 @@ ioPrimitives = [
 --   only supports :direction :input, :direction :output and :direction :io at the moment
 open :: [LispVal] -> ThrowsErrorIO LispVal
 open [] = throwError (NumArgsMismatch ">= 1" [])
-open [x@(String _)] = createInputFileStream x
-open [x@(String _),Keyword ":direction",Keyword ":input"] = createInputFileStream x
-open [x@(String _),Keyword ":direction",Keyword ":output"] = createOutputFileStream x
-open [x@(String _),Keyword ":direction",Keyword ":io"] = createIOFileStream x
+open (x@(String _):args) = (liftThrowsError $ processKeywords args keywordOptions) >>= open'
+    where
+        keywordOptions :: [(String, LispVal)]
+        keywordOptions = [
+                            (":direction" , Keyword ":input")
+                         ]
+
+        open' :: [LispVal] -> ThrowsErrorIO LispVal
+        open' [Keyword direction] | direction == ":input"  = createInputFileStream x
+                                  | direction == ":output" = createOutputFileStream x
+                                  | direction == ":io"     = createIOFileStream x
+                                  | otherwise = throwError (Default $ "invalid value for :direction, allowed values are " ++
+                                                                    (unwords $ map (show . fst) keywordOptions))
+        open' y = throwError (TypeMismatch "Keyword" (head y))
 open x = throwError (TypeMismatch "String" (head x))
 
 -- takes a String representing a filepath
