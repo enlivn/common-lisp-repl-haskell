@@ -5,7 +5,7 @@ import Types
 import Control.Monad.Error
 
 parseSingleExpr :: String -> ThrowsError LispVal
-parseSingleExpr = parseExpression lispParser
+parseSingleExpr = parseExpression (skipMany space >> lispParser)
 
 parseListOfExpr :: String -> ThrowsError [LispVal]
 parseListOfExpr = parseExpression (sepEndBy (skipMany space >> lispParser) (skipMany space))
