@@ -13,9 +13,6 @@ import System.IO.Error (isAlreadyInUseError, isDoesNotExistError)
 import Parser
 import Prelude hiding (read)
 
--- TODO: with-open-file
--- TODO: eval, backquoted list
-
 eval :: EnvIORef -> EnvIORef -> LispVal -> ThrowsErrorIO LispVal
 -- primitives
 eval _        _            x@(Keyword _)                                     = return x
@@ -47,13 +44,14 @@ eval envIORef funcEnvIORef (List (Atom "prin1":prin1Args))                   = p
 eval envIORef funcEnvIORef (List (Atom "print":printArgs))                   = printFunc =<< evalForms envIORef funcEnvIORef printArgs
 eval envIORef funcEnvIORef (List (Atom "write-string":writeStringArgs))      = writeString =<< evalForms envIORef funcEnvIORef writeStringArgs
 eval envIORef funcEnvIORef (List (Atom "function":functionArgs))             = function envIORef funcEnvIORef functionArgs
+eval envIORef funcEnvIORef (List (Atom "eval":evalArgs))                     = evalEval envIORef funcEnvIORef evalArgs
 eval envIORef funcEnvIORef (List (func:args))                                = do
                                                                                 evaledFunc <- getFunc envIORef funcEnvIORef func
                                                                                 evaledArgs <- evalForms envIORef funcEnvIORef args
                                                                                 -- note we don't pass in the environment here because
                                                                                 -- a function carries its own lexical environment
                                                                                 evalFunc evaledFunc evaledArgs
-eval _        _            x                                                 = throwError (Default (show x))
+eval _        _            x                                                 = return x
 
 getFunc :: EnvIORef -> EnvIORef -> LispVal -> ThrowsErrorIO LispVal
 getFunc _ funcEnvIORef (Atom x) = getVar funcEnvIORef x -- lookup symbols in the func namespace
@@ -366,6 +364,11 @@ function _ _ [] = throwError (NumArgsMismatch "1" [])
 function _ funcEnvIORef [Atom x] = getVar funcEnvIORef x -- lookup symbols in the func namespace
 function envIORef funcEnvIORef [x@(List (Atom "lambda":_))] = eval envIORef funcEnvIORef x -- evaluate the lambda
 function _ _ x = throwError (TypeMismatch "Atom or Lambda" (head x))
+
+-- eval
+evalEval :: EnvIORef -> EnvIORef -> [LispVal] -> ThrowsErrorIO LispVal
+evalEval envIORef funcEnvIORef [x] = eval envIORef funcEnvIORef x >>= eval envIORef funcEnvIORef
+evalEval _ _ x = throwError (NumArgsMismatch "1" x)
 
 -- primitives
 primitives :: [(String, [LispVal] -> ThrowsError LispVal)]

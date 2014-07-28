@@ -59,7 +59,7 @@ instance Show LispVal where
     show (DottedList h (Bool False)) = "(" ++ showLispValList h ++ ")"
     show (DottedList h t) = "(" ++ showLispValList h ++ " . " ++ show t ++ ")"
     show (PrimitiveFunc _) = "<primitive function>"
-    show (Func reqParams optParams restParam _ _ _) = "(lambda required("
+    show (Func reqParams optParams restParam _ _ _) = "<lambda> { ("
                                 ++ unwords reqParams ++ ")"
                                 ++ (case optParams of
                                         Nothing -> ""
@@ -67,7 +67,7 @@ instance Show LispVal where
                                 ++ (case restParam of
                                         Nothing -> ""
                                         Just x -> " &rest(" ++ x ++ ") ")
-                                ++ " ...)"
+                                ++ " ... }"
     show (FileStream _) = "<filestream>"
     show (IOFunc _) = "<io function>"
 
