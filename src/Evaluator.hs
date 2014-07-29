@@ -238,12 +238,9 @@ processFunctionDesignator envIORef funcEnvIORef functionDesignator = eval envIOR
 makeLambdaFunc :: [LispVal] -> EnvIORef -> EnvIORef -> ThrowsErrorIO LispVal
 makeLambdaFunc (List funcParams:funcBody) envIORef funcEnvIORef = do
     closure <- copyEnv envIORef -- a lambda carries its own lexical environment. Param mappings are added to the variable closure.
-    funcClosure <- copyEnv funcEnvIORef -- The function closure is copied undisturbed. It is copied though, so if you define any new functions
-                                        -- in this lambda's body, they won't disturb the global function namespace when they are finally eval'ed
-                                        -- in evalFunc
     optParams <- createOptionalParamList closure
     restParam <- createRestParam closure
-    return $ Func createReqParamList optParams restParam funcBody closure funcClosure
+    return $ Func createReqParamList optParams restParam funcBody closure funcEnvIORef
     where
           notRestAtom :: LispVal -> Bool
           notRestAtom (Atom "&rest") = False
