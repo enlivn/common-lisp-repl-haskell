@@ -30,9 +30,9 @@ eval envIORef funcEnvIORef (List (Atom "case":forms))                        = c
 eval envIORef funcEnvIORef (List (Atom "cond":forms))                        = condFunc envIORef funcEnvIORef forms
 eval envIORef funcEnvIORef (List [Atom "if", predicate, thenForm, elseForm]) = eval envIORef funcEnvIORef predicate >>= \x ->
                                                                                 case x of
-                                                                                    Bool True -> eval envIORef funcEnvIORef thenForm
                                                                                     Bool False -> eval envIORef funcEnvIORef elseForm
-                                                                                    _ -> throwError $ Default "if predicate did not evaluate to a boolean value"
+                                                                                    List [] -> eval envIORef funcEnvIORef elseForm
+                                                                                    _ ->  eval envIORef funcEnvIORef thenForm
 -- functions
 eval envIORef funcEnvIORef (List (Atom "setq":newValue))                     = evalSetq envIORef funcEnvIORef newValue
 eval envIORef funcEnvIORef (List (Atom "apply":funcParamsAndBody))           = apply envIORef funcEnvIORef funcParamsAndBody
@@ -482,9 +482,9 @@ stringChangeCase changeCaseFn (String s:args) = processKeywords args keywordOpti
             stringChangeCase' [Number start, Number end]
                 | start < 0 = throwError (Default "start index must be non-negative")
                 | end < 0 = throwError (Default "end index must be non-negative")
-                | end > (fromIntegral $ length s) = throwError (Default $ "end index cannot exceed " ++ (show $ length s))
+                | end > fromIntegral (length s) = throwError (Default $ "end index cannot exceed " ++ show (length s))
                 | start > end = throwError (Default $ "start index = " ++ show start ++ " cannot exceed end index = " ++ show end)
-                | otherwise = return $ String ((fst pre) ++ changeCaseFn (fst post) ++ (snd post))
+                | otherwise = return $ String (fst pre ++ changeCaseFn (fst post) ++ snd post)
                               where pre = splitAt (fromIntegral start) s
                                     post = splitAt (fromIntegral (end - start)) (snd pre)
             stringChangeCase' x = throwError (TypeMismatch "Number" (head x))
@@ -503,8 +503,8 @@ processKeywords args defaultOptions = collectArgs args >>= lookupArgs
 
         collectArgs :: [LispVal] -> ThrowsError [(String, LispVal)]
         collectArgs [] = return []
-        collectArgs (Keyword k:v:ys) = (liftM (++) (createOption k v)) <*> (collectArgs ys)
-        collectArgs y = throwError (TypeMismatch ("Keyword (allowed keywords are: " ++ ((unwords . map (show . fst)) defaultOptions) ++ ")") (head y))
+        collectArgs (Keyword k:v:ys) = liftM (++) (createOption k v) <*> collectArgs ys
+        collectArgs y = throwError (TypeMismatch ("Keyword (allowed keywords are: " ++ (unwords . map (show . fst)) defaultOptions ++ ")") (head y))
 
         createOption :: String -> LispVal -> ThrowsError [(String, LispVal)]
         createOption k v = case lookup k defaultOptions of
@@ -564,17 +564,17 @@ lengthFunc x = throwError (TypeMismatch "List or String" (head x))
 
 -- subseq
 subseq :: [LispVal] -> ThrowsError LispVal
-subseq [List x@[_]] = throwError $ (NumArgsMismatch ">= 2" x)
+subseq [List x@[_]] = throwError $ NumArgsMismatch ">= 2" x
 subseq y@[List x, Number _] = subseq (y ++ [Number $ (fromIntegral . length) x])
 subseq [List x, Number start, Number end] | start < 0 = throwError (Default "start index must be non-negative")
                                           | end < 0 = throwError (Default "end index must be non-negative")
-                                          | end > (fromIntegral $ length x) = throwError (Default $ "end index cannot exceed " ++ (show $ length x))
+                                          | end > fromIntegral (length x) = throwError (Default $ "end index cannot exceed " ++ show (length x))
                                           | start > end = throwError (Default $ "start index = " ++ show start ++ " cannot exceed end index = " ++ show end)
                                           | otherwise = return . List . take (fromIntegral (end - start)) . drop (fromIntegral start) $ x
 subseq y@[String x, Number _] = subseq (y ++ [Number $ (fromIntegral . length) x])
 subseq [String x, Number start, Number end] | start < 0 = throwError (Default "start index must be non-negative")
                                             | end < 0 = throwError (Default "end index must be non-negative")
-                                            | end > (fromIntegral $ length x) = throwError (Default $ "end index cannot exceed " ++ (show $ length x))
+                                            | end > fromIntegral (length x) = throwError (Default $ "end index cannot exceed " ++ show (length x))
                                             | start > end = throwError (Default $ "start index = " ++ show start ++ " cannot exceed end index = " ++ show end)
                                             | otherwise = return . String . take (fromIntegral (end - start)) . drop (fromIntegral start) $ x
 subseq x = throwError (TypeMismatch "List or String" (head x))
@@ -635,7 +635,7 @@ ioPrimitives = [
 --   only supports :direction :input, :direction :output and :direction :io at the moment
 open :: [LispVal] -> ThrowsErrorIO LispVal
 open [] = throwError (NumArgsMismatch ">= 1" [])
-open (x@(String _):args) = (liftThrowsError $ processKeywords args keywordOptions) >>= open'
+open (x@(String _):args) = liftThrowsError (processKeywords args keywordOptions) >>= open'
     where
         keywordOptions :: [(String, LispVal)]
         keywordOptions = [
@@ -647,7 +647,7 @@ open (x@(String _):args) = (liftThrowsError $ processKeywords args keywordOption
                                   | direction == ":output" = createOutputFileStream x
                                   | direction == ":io"     = createIOFileStream x
                                   | otherwise = throwError (Default $ "invalid value for :direction, allowed values are " ++
-                                                                    (unwords $ map (show . fst) keywordOptions))
+                                                                    unwords (map (show . fst) keywordOptions))
         open' y = throwError (TypeMismatch "Keyword" (head y))
 open x = throwError (TypeMismatch "String" (head x))
 
