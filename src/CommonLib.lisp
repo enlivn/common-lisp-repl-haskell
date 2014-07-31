@@ -70,3 +70,46 @@
 
 (defun assoc (obj l)
   (foldl (assoc-helper (curry 'eql obj)) '() l))
+
+(defun mapcar (f l)
+  (foldr (lambda (x y) (cons (funcall f x) y)) '() l))
+
+(defun remove (z l)
+  (foldr (lambda (x y) (if (eql z x) y (cons x y))) '() l))
+
+(defun remove-if (pred l)
+  (foldr (lambda (x y) (if (funcall pred x) y (cons x y))) '() l))
+
+(defun remove-if-not (pred l)
+  (foldr (lambda (x y) (if (not (funcall pred x)) y (cons x y))) '() l))
+
+(defun caar (x) (car (car x)))
+(defun cadr (x) (car (cdr x)))
+(defun cdar (x) (cdr (car x)))
+(defun cddr (x) (cdr (cdr x)))
+
+(defun caaar (x) (car (car (car x))))
+(defun caadr (x) (car (car (cdr x))))
+(defun cadar (x) (car (cdr (car x))))
+(defun caddr (x) (car (cdr (cdr x))))
+(defun cdaar (x) (cdr (car (car x))))
+(defun cdadr (x) (cdr (car (cdr x))))
+(defun cddar (x) (cdr (cdr (car x))))
+(defun cdddr (x) (cdr (cdr (cdr x))))
+
+(defun caaadr (x) (car (car (car (cdr x)))))
+(defun caaaar (x) (car (car (car (car x)))))
+(defun caadar (x) (car (car (cdr (car x)))))
+(defun cadaar (x) (car (cdr (car (car x)))))
+(defun caaddr (x) (car (car (cdr (cdr x)))))
+(defun cadadr (x) (car (cdr (car (cdr x)))))
+(defun caddar (x) (car (cdr (cdr (car x)))))
+(defun cdaaar (x) (cdr (car (car (car x)))))
+(defun cdaadr (x) (cdr (car (car (cdr x)))))
+(defun cadddr (x) (car (cdr (cdr (cdr x)))))
+(defun cdadar (x) (cdr (car (cdr (car x)))))
+(defun cdaddr (x) (cdr (car (cdr (cdr x)))))
+(defun cddaar (x) (cdr (cdr (car (car x)))))
+(defun cddadr (x) (cdr (cdr (car (cdr x)))))
+(defun cdddar (x) (cdr (cdr (cdr (car x)))))
+(defun cddddr (x) (cdr (cdr (cdr (cdr x)))))
