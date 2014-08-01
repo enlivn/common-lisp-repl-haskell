@@ -27,10 +27,10 @@ Supported Common Lisp Functions/Macros |
 `cons` |
 `length` |
 `subseq` |
-`reverse`<sup>*</sup> |
-`member`<sup>*</sup> |
-`assoc`<sup>*</sup> |
-`mapcar`<sup>*</sup> |
+`reverse` <sup>*</sup> |
+`member` <sup>*</sup> |
+`assoc` <sup>*</sup> |
+`mapcar` <sup>*</sup> |
 `remove`, `remove-if`, `remove-if-not` |
 `car`, `cdr` |
 `caar`, `cadr`, `cdar`, `cddr`, `caaar`, `caadr`, `cadar`, `caddr`, `cdaar`, `cdadr`, `cddar`, `cdddr`, `caaadrr`, `caaaarr`, `caadarr`, `cadaarr`, `caaddrr`, `cadadrr`, `caddarr`, `cdaaarr`, `cdaadrr`, `cadddrr`, `cdadarr`, `cdaddrr`, `cddaarr`, `cddadrr`, `cdddarr`, `cddddrr` <sup>*</sup> |
