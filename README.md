@@ -27,17 +27,18 @@ Supported Common Lisp Functions/Macros |
 `cons` |
 `length` |
 `subseq` |
-`reverse` |
-`member` |
-`assoc` |
-`mapcar` |
+`reverse`<sup>*</sup> |
+`member`<sup>*</sup> |
+`assoc`<sup>*</sup> |
+`mapcar`<sup>*</sup> |
 `remove`, `remove-if`, `remove-if-not` |
-`car`, `cdr`, `caar`, `cadr`, `cdar`, `cddr`, `caaar`, `caadr`, `cadar`, `caddr`, `cdaar`, `cdadr`, `cddar`, `cdddr`, `caaadrr`, `caaaarr`, `caadarr`, `cadaarr`, `caaddrr`, `cadadrr`, `caddarr`, `cdaaarr`, `cdaadrr`, `cadddrr`, `cdadarr`, `cdaddrr`, `cddaarr`, `cddadrr`, `cdddarr`, `cddddrr` |
+`car`, `cdr` |
+`caar`, `cadr`, `cdar`, `cddr`, `caaar`, `caadr`, `cadar`, `caddr`, `cdaar`, `cdadr`, `cddar`, `cdddr`, `caaadrr`, `caaaarr`, `caadarr`, `cadaarr`, `caaddrr`, `cadadrr`, `caddarr`, `cdaaarr`, `cdaadrr`, `cadddrr`, `cdadarr`, `cdaddrr`, `cddaarr`, `cddadrr`, `cdddarr`, `cddddrr` <sup>*</sup> |
 `function` |
 **Number functions** |
 `+`, `-`, `1+`, `1-`, `*`, `/` |
 `/=`, `=`, `<`, `>`, `<=`, `>=` |
-`plusp`, `minusp`, `evenp`, `oddp` |
+`plusp`, `minusp`, `evenp`, `oddp` <sup>*</sup>|
 `mod`, `rem` |
 **String functions** |
 `string=`, `string-equal`, `string/=`, `string<`, `string-lessp`, `string>`, `string-greaterp`, `string<=`, `string-not-greaterp`, `string>=`, `string-not-lesserp` |
@@ -57,7 +58,7 @@ Supported Common Lisp Functions/Macros |
 `atom` |
 `quoted` (') |
 `not`, `and`, `or` |
-
+<sup>*</sup> indicates functions defined in `CommonLib.lisp`. It is only available in REPL mode. See the 'Running' section below on how to make these functions available in the REPL |
 
 
 ####Running
@@ -85,6 +86,10 @@ Run in single-command mode
 
     $> clisp "your common lisp expression"
 
+If you want the functions defined in `CommonLib.lisp` (the ones marked by <sup>*</sup> in the list of supported functions above) to be available, you must load it after the REPL starts
+
+    clisp>> (load "src/CommonLib.lisp")
+
 ####Details
 This project closely follows the excellent wikibook [Write Yourself a Scheme in 48 Hours](http://en.wikibooks.org/wiki/Write_Yourself_a_Scheme_in_48_Hours) by Jonathan Tang.
 
@@ -92,3 +97,4 @@ There are some important differences:
 
 * Support for Lisp-2 namespaces (distinct variable and function namespaces) (instead of Scheme's Lisp-1 namespaces)
 * Support for Common Lisp functions (instead of Scheme functions)
+
