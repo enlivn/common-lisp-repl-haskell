@@ -64,8 +64,8 @@ Supported Common Lisp Functions/Macros |
 ####Running
 You will need GHCI installed.
 
-    $> git clone https://github.com/neerajrao/haskell-common-lisp-interpreter.git
-    $> cd haskell-common-lisp-interpreter
+    $> git clone https://github.com/neerajrao/common-lisp-repl-haskell.git
+    $> cd common-lisp-repl-haskell
 
 You can now try one of the following
 
