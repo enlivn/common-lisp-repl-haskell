@@ -5,11 +5,14 @@
 * Interpreter supporting lambdas, closures, many Common Lisp functions (see complete list below)
 * Can be run in REPL or single-command mode (see details in 'Running' section below)
 
-Supported Common Lisp Type | |
------- | ----
-`Symbols` | `Lists` (and Dotted Lists) |
-`Functions` | `Streams` |
-`Strings` | `Numbers` (integers only)
+Supported Common Lisp Types |
+------ |
+`Symbols` |
+`Lists` (and Dotted Lists) |
+`Functions` |
+`Streams` |
+`Strings` |
+`Numbers` (integers only)
 
 Supported Common Lisp Functions/Macros |
 ------ |
