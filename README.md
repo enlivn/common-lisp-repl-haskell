@@ -34,7 +34,7 @@ Supported Common Lisp Functions/Macros |
 `member` <sup>*</sup> |
 `assoc` <sup>*</sup> |
 `mapcar` <sup>*</sup> |
-`remove`, `remove-if`, `remove-if-not` |
+`remove`, `remove-if`, `remove-if-not` <sup>*</sup> |
 `car`, `cdr` |
 `caar`, `cadr`, `cdar`, `cddr`, `caaar`, `caadr`, `cadar`, `caddr`, `cdaar`, `cdadr`, `cddar`, `cdddr`, `caaadrr`, `caaaarr`, `caadarr`, `cadaarr`, `caaddrr`, `cadadrr`, `caddarr`, `cdaaarr`, `cdaadrr`, `cadddrr`, `cdadarr`, `cdaddrr`, `cddaarr`, `cddadrr`, `cdddarr`, `cddddrr` <sup>*</sup> |
 `function` |
@@ -49,7 +49,7 @@ Supported Common Lisp Functions/Macros |
 **IO functions** |
 `read` |
 `load` |
-`open` (with `:direction`, `:input`, `:output`, `:io` |
+`open` (with `:direction`, `:input`, `:output`, `:io`) |
 `close` |
 `prin1` |
 `print` |
