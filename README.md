@@ -1,6 +1,6 @@
-###Common Lisp REPL written in Haskell
+### Common Lisp REPL written in Haskell
 
-####Features
+#### Features
 
 * Interpreter supporting lambdas, closures, many Common Lisp functions (see complete list below)
 * Can be run in REPL or single-command mode (see details in 'Running' section below)
@@ -64,7 +64,7 @@ Supported Common Lisp Functions/Macros |
 <sup>*</sup> indicates functions defined in `CommonLib.lisp`. It is only available in REPL mode. See the 'Running' section below on how to make these functions available in the REPL |
 
 
-####Running
+#### Running
 You will need GHCI installed.
 
     $> git clone https://github.com/neerajrao/common-lisp-repl-haskell.git
@@ -93,7 +93,7 @@ If you want the functions defined in `CommonLib.lisp` (the ones marked by <sup>*
 
     clisp>> (load "src/CommonLib.lisp")
 
-####Details
+#### Details
 This project closely follows the excellent wikibook [Write Yourself a Scheme in 48 Hours](http://en.wikibooks.org/wiki/Write_Yourself_a_Scheme_in_48_Hours) by Jonathan Tang.
 
 There are some important differences:
